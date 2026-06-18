@@ -3098,9 +3098,111 @@ class TipoLicencia(Base):
 
 - [ ] **Step 2: Schemas + repo + service + router**
 
-Mirror Task 3.2: schemas with `codigo`, `nombre`, `base_legal`, `paga`, `computa_dias`. Repo with `list_all`, `by_codigo`, `get`, `insert`. Service raises `ConflictError` on duplicate `codigo`. Router under `/api/tipos-licencia`, POST gated by `Rol.ADMIN`.
+```python
+# backend/app/modules/tipos_licencia/schemas.py
+from uuid import UUID
+from pydantic import BaseModel, ConfigDict
 
-- [ ] **Step 3: Test (same shape as 3.2)**
+
+class TipoLicenciaCreate(BaseModel):
+    codigo: str
+    nombre: str
+    base_legal: str | None = None
+    paga: bool = True
+    computa_dias: bool = True
+
+
+class TipoLicenciaOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: UUID
+    codigo: str
+    nombre: str
+    base_legal: str | None
+    paga: bool
+    computa_dias: bool
+```
+
+```python
+# backend/app/modules/tipos_licencia/repository.py
+from uuid import UUID
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from app.modules.tipos_licencia.models import TipoLicencia
+
+
+async def list_all(s: AsyncSession) -> list[TipoLicencia]:
+    return list((await s.execute(select(TipoLicencia).order_by(TipoLicencia.codigo))).scalars())
+
+async def by_codigo(s: AsyncSession, codigo: str) -> TipoLicencia | None:
+    return (await s.execute(select(TipoLicencia).where(TipoLicencia.codigo == codigo))).scalar_one_or_none()
+
+async def get(s: AsyncSession, id_: UUID) -> TipoLicencia | None:
+    return (await s.execute(select(TipoLicencia).where(TipoLicencia.id == id_))).scalar_one_or_none()
+
+async def insert(s: AsyncSession, t: TipoLicencia) -> TipoLicencia:
+    s.add(t); await s.flush(); return t
+```
+
+```python
+# backend/app/modules/tipos_licencia/service.py
+from sqlalchemy.ext.asyncio import AsyncSession
+from app.modules.tipos_licencia import repository as repo
+from app.modules.tipos_licencia.models import TipoLicencia
+from app.modules.tipos_licencia.schemas import TipoLicenciaCreate
+from app.shared.exceptions import ConflictError
+
+
+async def create_tipo(s: AsyncSession, p: TipoLicenciaCreate) -> TipoLicencia:
+    if await repo.by_codigo(s, p.codigo):
+        raise ConflictError("tipo de licencia ya existe", detail={"field": "codigo"})
+    return await repo.insert(s, TipoLicencia(
+        codigo=p.codigo, nombre=p.nombre, base_legal=p.base_legal,
+        paga=p.paga, computa_dias=p.computa_dias,
+    ))
+```
+
+```python
+# backend/app/modules/tipos_licencia/router.py
+from fastapi import APIRouter, Depends
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.deps import get_db
+from app.core.permissions import require_role
+from app.modules.tipos_licencia import repository as repo
+from app.modules.tipos_licencia.schemas import TipoLicenciaCreate, TipoLicenciaOut
+from app.modules.tipos_licencia.service import create_tipo
+from app.modules.usuarios.models import Rol
+
+router = APIRouter(prefix="/api/tipos-licencia", tags=["tipos-licencia"])
+
+
+@router.get("", response_model=list[TipoLicenciaOut])
+async def list_(s: AsyncSession = Depends(get_db)):
+    return await repo.list_all(s)
+
+
+@router.post("", response_model=TipoLicenciaOut, status_code=201,
+             dependencies=[Depends(require_role(Rol.ADMIN))])
+async def create(p: TipoLicenciaCreate, s: AsyncSession = Depends(get_db)):
+    return await create_tipo(s, p)
+```
+
+- [ ] **Step 3: Test**
+
+```python
+# backend/tests/modules/tipos_licencia/test_service.py
+import pytest
+from app.modules.tipos_licencia.schemas import TipoLicenciaCreate
+from app.modules.tipos_licencia.service import create_tipo
+from app.shared.exceptions import ConflictError
+
+
+@pytest.mark.asyncio
+async def test_unique_codigo(db_session):
+    await create_tipo(db_session, TipoLicenciaCreate(codigo="enfermedad-comun", nombre="Enfermedad común"))
+    with pytest.raises(ConflictError):
+        await create_tipo(db_session, TipoLicenciaCreate(codigo="enfermedad-comun", nombre="x"))
+```
 
 - [ ] **Step 4: Migration + commit**
 
@@ -3142,12 +3244,117 @@ class Diagnostico(Base):
     requiere_junta: Mapped[bool] = mapped_column(Boolean, default=False)
 ```
 
-- [ ] **Step 2-4: Schemas/repo/service/router/tests/migration follow same shape as Task 3.2.**
+- [ ] **Step 2: Schemas + repo + service + router**
 
-Router under `/api/diagnosticos`, POST gated by `Rol.ADMIN`. Allow optional filter `?categoria=`.
+```python
+# backend/app/modules/diagnosticos/schemas.py
+from uuid import UUID
+from pydantic import BaseModel, ConfigDict
 
-Commit:
+
+class DiagnosticoCreate(BaseModel):
+    codigo_cie10: str | None = None
+    descripcion: str
+    categoria: str | None = None
+    requiere_junta: bool = False
+
+
+class DiagnosticoOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: UUID
+    codigo_cie10: str | None
+    descripcion: str
+    categoria: str | None
+    requiere_junta: bool
+```
+
+```python
+# backend/app/modules/diagnosticos/repository.py
+from uuid import UUID
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from app.modules.diagnosticos.models import Diagnostico
+
+
+async def list_all(s: AsyncSession, categoria: str | None = None) -> list[Diagnostico]:
+    stmt = select(Diagnostico).order_by(Diagnostico.descripcion)
+    if categoria:
+        stmt = stmt.where(Diagnostico.categoria == categoria)
+    return list((await s.execute(stmt)).scalars())
+
+async def get(s: AsyncSession, id_: UUID) -> Diagnostico | None:
+    return (await s.execute(select(Diagnostico).where(Diagnostico.id == id_))).scalar_one_or_none()
+
+async def insert(s: AsyncSession, d: Diagnostico) -> Diagnostico:
+    s.add(d); await s.flush(); return d
+```
+
+```python
+# backend/app/modules/diagnosticos/service.py
+from sqlalchemy.ext.asyncio import AsyncSession
+from app.modules.diagnosticos import repository as repo
+from app.modules.diagnosticos.models import Diagnostico
+from app.modules.diagnosticos.schemas import DiagnosticoCreate
+
+
+async def create_diagnostico(s: AsyncSession, p: DiagnosticoCreate) -> Diagnostico:
+    return await repo.insert(s, Diagnostico(
+        codigo_cie10=p.codigo_cie10, descripcion=p.descripcion,
+        categoria=p.categoria, requiere_junta=p.requiere_junta,
+    ))
+```
+
+```python
+# backend/app/modules/diagnosticos/router.py
+from fastapi import APIRouter, Depends, Query
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.deps import get_db
+from app.core.permissions import require_role
+from app.modules.diagnosticos import repository as repo
+from app.modules.diagnosticos.schemas import DiagnosticoCreate, DiagnosticoOut
+from app.modules.diagnosticos.service import create_diagnostico
+from app.modules.usuarios.models import Rol
+
+router = APIRouter(prefix="/api/diagnosticos", tags=["diagnosticos"])
+
+
+@router.get("", response_model=list[DiagnosticoOut])
+async def list_(categoria: str | None = Query(default=None), s: AsyncSession = Depends(get_db)):
+    return await repo.list_all(s, categoria=categoria)
+
+
+@router.post("", response_model=DiagnosticoOut, status_code=201,
+             dependencies=[Depends(require_role(Rol.ADMIN))])
+async def create(p: DiagnosticoCreate, s: AsyncSession = Depends(get_db)):
+    return await create_diagnostico(s, p)
+```
+
+- [ ] **Step 3: Test**
+
+```python
+# backend/tests/modules/diagnosticos/test_service.py
+import pytest
+from app.modules.diagnosticos.schemas import DiagnosticoCreate
+from app.modules.diagnosticos.service import create_diagnostico
+
+
+@pytest.mark.asyncio
+async def test_create_diagnostico_basic(db_session):
+    d = await create_diagnostico(db_session, DiagnosticoCreate(
+        codigo_cie10="J06.9", descripcion="Infección respiratoria aguda",
+        categoria="infeccioso", requiere_junta=False,
+    ))
+    assert d.id is not None
+    assert d.categoria == "infeccioso"
+```
+
+- [ ] **Step 4: Migration + commit**
+
 ```bash
+cd backend && uv run alembic revision --autogenerate -m "diagnosticos"
+uv run alembic upgrade head
+uv run pytest tests/modules/diagnosticos -v
 git add backend/app/modules/diagnosticos backend/tests/modules/diagnosticos backend/alembic/versions backend/alembic/env.py backend/app/main.py
 git commit -m "feat(diagnosticos): diagnosticos CRUD"
 ```
@@ -6862,7 +7069,6 @@ from app.core.db import sessionmaker_factory
 from app.core.settings import get_settings
 from app.modules.categorias.schemas import CategoriaCreate
 from app.modules.categorias.service import create_categoria
-from app.modules.diagnosticos.schemas import DiagnosticoCreate  # noqa: assumes simple create
 from app.modules.tipos_licencia.schemas import TipoLicenciaCreate
 from app.modules.tipos_licencia.service import create_tipo
 from app.modules.usuarios.models import Rol
