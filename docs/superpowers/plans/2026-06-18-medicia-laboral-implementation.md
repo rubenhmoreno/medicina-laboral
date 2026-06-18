@@ -5092,3 +5092,271 @@ git commit -m "feat(licencias): persiste state_change en auditoría con payload 
 ```
 
 ---
+
+## Phase 7 — Reportes y exportes
+
+### Task 7.1: Agregados SQL — ausentismo por área, categoría de diagnóstico y período
+
+**Files:**
+- Create: `backend/app/modules/reportes/{__init__,schemas,repository,service,router}.py`
+- Create: `backend/tests/modules/reportes/{__init__,test_service}.py`
+
+- [ ] **Step 1: Schemas**
+
+```python
+# backend/app/modules/reportes/schemas.py
+from datetime import date
+from pydantic import BaseModel
+
+
+class AusentismoPorArea(BaseModel):
+    area_id: str | None
+    area_nombre: str | None
+    total_licencias: int
+    total_dias_otorgados: int
+
+
+class AusentismoPorCategoriaDiag(BaseModel):
+    categoria_diagnostico: str | None
+    total_licencias: int
+    total_dias_otorgados: int
+
+
+class FrecuenciaMensual(BaseModel):
+    anio: int
+    mes: int
+    total_licencias: int
+    total_dias_otorgados: int
+
+
+class ReporteParams(BaseModel):
+    desde: date
+    hasta: date
+    area_id: str | None = None
+```
+
+- [ ] **Step 2: Repository (raw aggregate SQL)**
+
+```python
+# backend/app/modules/reportes/repository.py
+from datetime import date
+
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
+
+
+async def ausentismo_por_area(s: AsyncSession, desde: date, hasta: date) -> list[dict]:
+    sql = text("""
+        SELECT a.id::text AS area_id, a.nombre AS area_nombre,
+               COUNT(l.id) AS total_licencias,
+               COALESCE(SUM(l.dias_otorgados), 0) AS total_dias_otorgados
+        FROM licencias l
+        JOIN empleados e ON e.id = l.empleado_id
+        LEFT JOIN areas a ON a.id = e.area_id
+        WHERE l.estado = 'validado'
+          AND l.fecha_desde BETWEEN :desde AND :hasta
+        GROUP BY a.id, a.nombre
+        ORDER BY total_dias_otorgados DESC
+    """)
+    res = await s.execute(sql, {"desde": desde, "hasta": hasta})
+    return [dict(r._mapping) for r in res]
+
+
+async def ausentismo_por_categoria_diag(s: AsyncSession, desde: date, hasta: date) -> list[dict]:
+    # Aggregates by DIAGNOSTIC CATEGORY only — never by description (PII).
+    sql = text("""
+        SELECT d.categoria AS categoria_diagnostico,
+               COUNT(l.id) AS total_licencias,
+               COALESCE(SUM(l.dias_otorgados), 0) AS total_dias_otorgados
+        FROM licencias l
+        LEFT JOIN diagnosticos d ON d.id = l.diagnostico_id
+        WHERE l.estado = 'validado'
+          AND l.fecha_desde BETWEEN :desde AND :hasta
+        GROUP BY d.categoria
+        ORDER BY total_dias_otorgados DESC
+    """)
+    res = await s.execute(sql, {"desde": desde, "hasta": hasta})
+    return [dict(r._mapping) for r in res]
+
+
+async def frecuencia_mensual(s: AsyncSession, desde: date, hasta: date) -> list[dict]:
+    sql = text("""
+        SELECT EXTRACT(YEAR FROM l.fecha_desde)::int AS anio,
+               EXTRACT(MONTH FROM l.fecha_desde)::int AS mes,
+               COUNT(l.id) AS total_licencias,
+               COALESCE(SUM(l.dias_otorgados), 0) AS total_dias_otorgados
+        FROM licencias l
+        WHERE l.estado = 'validado'
+          AND l.fecha_desde BETWEEN :desde AND :hasta
+        GROUP BY 1, 2
+        ORDER BY 1, 2
+    """)
+    res = await s.execute(sql, {"desde": desde, "hasta": hasta})
+    return [dict(r._mapping) for r in res]
+```
+
+- [ ] **Step 3: Service (no extra logic v1, passthrough)**
+
+```python
+# backend/app/modules/reportes/service.py
+from datetime import date
+from sqlalchemy.ext.asyncio import AsyncSession
+from app.modules.reportes import repository as repo
+
+
+async def por_area(s: AsyncSession, desde: date, hasta: date):
+    return await repo.ausentismo_por_area(s, desde, hasta)
+
+
+async def por_categoria_diag(s: AsyncSession, desde: date, hasta: date):
+    return await repo.ausentismo_por_categoria_diag(s, desde, hasta)
+
+
+async def por_mes(s: AsyncSession, desde: date, hasta: date):
+    return await repo.frecuencia_mensual(s, desde, hasta)
+```
+
+- [ ] **Step 4: Router with CSV export**
+
+```python
+# backend/app/modules/reportes/router.py
+import csv
+import io
+from datetime import date
+
+from fastapi import APIRouter, Depends, Query
+from fastapi.responses import StreamingResponse
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.deps import current_user, get_db
+from app.modules.auditoria import repository as audit_repo
+from app.modules.reportes import service as svc
+from app.modules.usuarios.models import Usuario
+
+router = APIRouter(prefix="/api/reportes", tags=["reportes"])
+
+
+def _csv_response(rows: list[dict], filename: str) -> StreamingResponse:
+    buf = io.StringIO()
+    if rows:
+        writer = csv.DictWriter(buf, fieldnames=list(rows[0].keys()))
+        writer.writeheader()
+        for r in rows:
+            writer.writerow(r)
+    buf.seek(0)
+    return StreamingResponse(
+        iter([buf.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/por-area")
+async def por_area(
+    desde: date = Query(...),
+    hasta: date = Query(...),
+    formato: str = Query("json", pattern="^(json|csv)$"),
+    s: AsyncSession = Depends(get_db),
+    user: Usuario = Depends(current_user),
+):
+    rows = await svc.por_area(s, desde, hasta)
+    if formato == "csv":
+        await audit_repo.append(s, accion="export", entidad="reporte",
+                                usuario_id=user.id, entidad_id=None,
+                                payload={"reporte": "por_area", "desde": str(desde), "hasta": str(hasta)},
+                                ip=None, user_agent=None)
+        return _csv_response(rows, f"ausentismo_area_{desde}_{hasta}.csv")
+    return rows
+
+
+@router.get("/por-categoria-diag")
+async def por_categoria_diag(
+    desde: date = Query(...), hasta: date = Query(...),
+    formato: str = Query("json", pattern="^(json|csv)$"),
+    s: AsyncSession = Depends(get_db), user: Usuario = Depends(current_user),
+):
+    rows = await svc.por_categoria_diag(s, desde, hasta)
+    if formato == "csv":
+        await audit_repo.append(s, accion="export", entidad="reporte",
+                                usuario_id=user.id, entidad_id=None,
+                                payload={"reporte": "por_categoria_diag"},
+                                ip=None, user_agent=None)
+        return _csv_response(rows, f"ausentismo_diag_{desde}_{hasta}.csv")
+    return rows
+
+
+@router.get("/mensual")
+async def mensual(
+    desde: date = Query(...), hasta: date = Query(...),
+    formato: str = Query("json", pattern="^(json|csv)$"),
+    s: AsyncSession = Depends(get_db), user: Usuario = Depends(current_user),
+):
+    rows = await svc.por_mes(s, desde, hasta)
+    if formato == "csv":
+        await audit_repo.append(s, accion="export", entidad="reporte",
+                                usuario_id=user.id, entidad_id=None,
+                                payload={"reporte": "mensual"},
+                                ip=None, user_agent=None)
+        return _csv_response(rows, f"ausentismo_mensual_{desde}_{hasta}.csv")
+    return rows
+```
+
+- [ ] **Step 5: Tests**
+
+```python
+# backend/tests/modules/reportes/test_service.py
+from datetime import date
+
+import pytest
+
+from app.modules.categorias.schemas import CategoriaCreate
+from app.modules.categorias.service import create_categoria
+from app.modules.empleados.schemas import EmpleadoCreate
+from app.modules.empleados.service import create_empleado
+from app.modules.licencias.models import EstadoLicencia, Licencia, OrigenLicencia
+from app.modules.reportes.service import por_area, por_mes
+from app.modules.tipos_licencia.schemas import TipoLicenciaCreate
+from app.modules.tipos_licencia.service import create_tipo
+from app.modules.usuarios.models import Rol
+from app.modules.usuarios.schemas import UsuarioCreate
+from app.modules.usuarios.service import create_user
+
+
+@pytest.mark.asyncio
+async def test_por_area_y_por_mes(db_session):
+    u = await create_user(db_session, UsuarioCreate(email="u@u.com", password="StrongPass123!Q", nombre="U", rol=Rol.ADMIN))
+    cat = await create_categoria(db_session, CategoriaCreate(codigo="p", nombre="P"))
+    tipo = await create_tipo(db_session, TipoLicenciaCreate(codigo="ec", nombre="EC"))
+    await db_session.flush()
+    emp = await create_empleado(db_session, EmpleadoCreate(
+        legajo="L", cuil="20111111119", nombre="A", apellido="B",
+        fecha_ingreso=date(2020,1,1), categoria_id=cat.id))
+    db_session.add(Licencia(
+        empleado_id=emp.id, tipo_licencia_id=tipo.id,
+        fecha_desde=date(2026,3,1), fecha_hasta=date(2026,3,10),
+        dias_solicitados=10, dias_otorgados=10,
+        estado=EstadoLicencia.VALIDADO, origen=OrigenLicencia.RRHH,
+        creado_por=u.id,
+    ))
+    await db_session.flush()
+    a = await por_area(db_session, date(2026,1,1), date(2026,12,31))
+    assert a and a[0]["total_dias_otorgados"] == 10
+    m = await por_mes(db_session, date(2026,1,1), date(2026,12,31))
+    assert any(row["mes"] == 3 and row["total_dias_otorgados"] == 10 for row in m)
+```
+
+- [ ] **Step 6: Run + register + commit**
+
+In `main.py`:
+```python
+from app.modules.reportes.router import router as reportes_router
+app.include_router(reportes_router)
+```
+
+```bash
+uv run pytest tests/modules/reportes -v
+git add backend/app/modules/reportes backend/tests/modules/reportes backend/app/main.py
+git commit -m "feat(reportes): agregados por área, categoría diagnóstico, mensual + export CSV con auditoría"
+```
+
+---
