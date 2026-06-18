@@ -6808,3 +6808,410 @@ git commit -m "test(e2e): 4 escenarios golden path + a11y bloqueante + CI job"
 ```
 
 ---
+
+## Phase 11 — Scripts de portabilidad
+
+### Task 11.1: `backend/Dockerfile`
+
+**Files:**
+- Create: `backend/Dockerfile`
+
+```dockerfile
+# backend/Dockerfile
+FROM python:3.12-slim AS base
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    UV_LINK_MODE=copy
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      curl ca-certificates && rm -rf /var/lib/apt/lists/* \
+ && pip install --no-cache-dir uv
+
+WORKDIR /app
+COPY pyproject.toml uv.lock* ./
+RUN uv sync --frozen --no-dev || uv sync --no-dev
+
+COPY . .
+
+EXPOSE 8000
+CMD ["uv", "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+```
+
+Commit:
+```bash
+git add backend/Dockerfile
+git commit -m "build(backend): Dockerfile multi-stage con uv"
+```
+
+---
+
+### Task 11.2: Seed script
+
+**Files:**
+- Create: `backend/scripts/seed_dev.py`
+
+```python
+# backend/scripts/seed_dev.py
+"""Idempotent seed for dev/CI. Creates 1 admin + 1 médico + 1 rrhh + base catálogos."""
+import asyncio
+import os
+from datetime import date
+
+from app.core.db import sessionmaker_factory
+from app.core.settings import get_settings
+from app.modules.categorias.schemas import CategoriaCreate
+from app.modules.categorias.service import create_categoria
+from app.modules.diagnosticos.schemas import DiagnosticoCreate  # noqa: assumes simple create
+from app.modules.tipos_licencia.schemas import TipoLicenciaCreate
+from app.modules.tipos_licencia.service import create_tipo
+from app.modules.usuarios.models import Rol
+from app.modules.usuarios.repository import get_by_email
+from app.modules.usuarios.schemas import UsuarioCreate
+from app.modules.usuarios.service import create_user
+
+SETTINGS = get_settings()
+
+
+async def main():
+    factory = sessionmaker_factory(SETTINGS.db_dsn)
+    async with factory() as s:
+        # Users
+        if not await get_by_email(s, os.environ["ADMIN_EMAIL"]):
+            await create_user(s, UsuarioCreate(
+                email=os.environ["ADMIN_EMAIL"],
+                password=os.environ["ADMIN_PASSWORD"],
+                nombre="Admin", rol=Rol.ADMIN,
+            ))
+        if not await get_by_email(s, "medico@medicia.local"):
+            await create_user(s, UsuarioCreate(
+                email="medico@medicia.local",
+                password="MedicoPass123!XYZ",
+                nombre="Médico", rol=Rol.MEDICO, matricula="MN12345",
+            ))
+        if not await get_by_email(s, "rrhh@medicia.local"):
+            await create_user(s, UsuarioCreate(
+                email="rrhh@medicia.local",
+                password="RrhhPass123!XYZ",
+                nombre="RRHH", rol=Rol.RRHH,
+            ))
+
+        # Categorías base
+        for codigo, nombre in [
+            ("planta-permanente", "Planta permanente"),
+            ("contratado", "Contratado"),
+            ("monotributista", "Monotributista"),
+        ]:
+            try:
+                await create_categoria(s, CategoriaCreate(codigo=codigo, nombre=nombre))
+            except Exception:
+                pass
+
+        # Tipos de licencia base
+        for codigo, nombre in [
+            ("enfermedad-comun", "Enfermedad común"),
+            ("accidente-trabajo", "Accidente de trabajo"),
+            ("examen-medico", "Examen médico"),
+            ("maternidad", "Maternidad"),
+            ("larga-enfermedad", "Larga enfermedad"),
+        ]:
+            try:
+                await create_tipo(s, TipoLicenciaCreate(codigo=codigo, nombre=nombre))
+            except Exception:
+                pass
+
+        await s.commit()
+        print("Seed OK")
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+Commit:
+```bash
+git add backend/scripts/seed_dev.py
+git commit -m "feat(backend): seed_dev.py idempotente (admin/médico/rrhh + catálogos base)"
+```
+
+---
+
+### Task 11.3: `scripts/bootstrap.sh`
+
+**Files:**
+- Create: `scripts/bootstrap.sh`
+
+```bash
+#!/usr/bin/env bash
+# scripts/bootstrap.sh — primera instalación en un servidor.
+set -euo pipefail
+
+if [[ ! -f .env ]]; then
+  echo "ERROR: copiá .env.example a .env y completá los valores antes de correr bootstrap." >&2
+  exit 1
+fi
+
+set -a; . ./.env; set +a
+
+echo "→ Levantando dependencias (postgres + minio)…"
+docker compose -f docker-compose.prod.yml up -d postgres minio
+
+echo "→ Esperando a postgres…"
+until docker compose -f docker-compose.prod.yml exec -T postgres pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB" >/dev/null 2>&1; do
+  sleep 1
+done
+
+echo "→ Creando bucket en MinIO (si no existe)…"
+docker compose -f docker-compose.prod.yml run --rm minio-init || true
+
+echo "→ Ejecutando migraciones…"
+docker compose -f docker-compose.prod.yml run --rm backend uv run alembic upgrade head
+
+echo "→ Seed (admin desde .env si no existe)…"
+docker compose -f docker-compose.prod.yml run --rm \
+  -e ADMIN_EMAIL -e ADMIN_PASSWORD backend uv run python scripts/seed_dev.py
+
+echo "→ Levantando backend + nginx…"
+docker compose -f docker-compose.prod.yml up -d
+
+echo "OK → curl -fsS http://localhost/readyz"
+```
+
+Make it executable + commit:
+```bash
+chmod +x scripts/bootstrap.sh
+git add scripts/bootstrap.sh
+git commit -m "feat(ops): scripts/bootstrap.sh idempotente para primera instalación"
+```
+
+---
+
+### Task 11.4: `scripts/backup.sh` y `scripts/restore.sh`
+
+**Files:**
+- Create: `scripts/backup.sh`
+- Create: `scripts/restore.sh`
+
+```bash
+#!/usr/bin/env bash
+# scripts/backup.sh — corre vía cron. Salida: ./backups/<timestamp>/
+set -euo pipefail
+
+set -a; . ./.env; set +a
+
+TS=$(date -u +%Y-%m-%dT%H-%M-%SZ)
+OUT="./backups/${TS}"
+mkdir -p "$OUT" "$OUT/minio"
+
+echo "→ pg_dump..."
+docker compose -f docker-compose.prod.yml exec -T postgres \
+  pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc -Z9 > "$OUT/db.dump"
+
+echo "→ pg_dump auditoría (separado)..."
+docker compose -f docker-compose.prod.yml exec -T postgres \
+  pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -t auditoria -Fc -Z9 > "$OUT/auditoria.dump"
+
+echo "→ mirror MinIO..."
+docker compose -f docker-compose.prod.yml run --rm \
+  -v "$(pwd)/${OUT}/minio:/mirror" minio-init \
+  sh -c "mc alias set local http://minio:9000 \$MINIO_ROOT_USER \$MINIO_ROOT_PASSWORD && mc mirror --overwrite local/\$MINIO_BUCKET /mirror/"
+
+echo "→ manifest sha256..."
+( cd "$OUT" && sha256sum db.dump auditoria.dump > MANIFEST.sha256 )
+
+echo "→ retención 30 días..."
+find ./backups -mindepth 1 -maxdepth 1 -type d -mtime +30 -exec rm -rf {} +
+
+echo "Backup OK → $OUT"
+```
+
+```bash
+#!/usr/bin/env bash
+# scripts/restore.sh <dir-de-backup>
+set -euo pipefail
+
+if [[ $# -lt 1 ]]; then
+  echo "uso: $0 ./backups/<timestamp>" >&2; exit 1
+fi
+DIR="$1"
+set -a; . ./.env; set +a
+
+echo "→ verificando integridad…"
+( cd "$DIR" && sha256sum --check MANIFEST.sha256 )
+
+echo "→ restaurando Postgres…"
+cat "$DIR/db.dump" | docker compose -f docker-compose.prod.yml exec -T postgres \
+  pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --clean --if-exists
+
+echo "→ restaurando MinIO…"
+docker compose -f docker-compose.prod.yml run --rm \
+  -v "$(pwd)/${DIR}/minio:/mirror" minio-init \
+  sh -c "mc alias set local http://minio:9000 \$MINIO_ROOT_USER \$MINIO_ROOT_PASSWORD && mc mirror --overwrite /mirror/ local/\$MINIO_BUCKET"
+
+echo "Restore OK desde $DIR"
+```
+
+Make executable + commit:
+```bash
+chmod +x scripts/backup.sh scripts/restore.sh
+git add scripts/backup.sh scripts/restore.sh
+git commit -m "feat(ops): scripts de backup (pg+minio) y restore con verificación sha256"
+```
+
+---
+
+### Task 11.5: `scripts/migrate.sh`
+
+**Files:**
+- Create: `scripts/migrate.sh`
+
+```bash
+#!/usr/bin/env bash
+# scripts/migrate.sh <user@host> <ruta-en-destino>
+# Migra una instalación ya operativa al servidor destino.
+set -euo pipefail
+
+if [[ $# -lt 2 ]]; then
+  echo "uso: $0 user@host /ruta/destino" >&2; exit 1
+fi
+TARGET_HOST="$1"
+TARGET_DIR="$2"
+
+echo "→ Generando backup local…"
+./scripts/backup.sh
+LAST=$(ls -1dt ./backups/*/ | head -1 | sed 's:/$::')
+
+echo "→ Sincronizando código a $TARGET_HOST:$TARGET_DIR …"
+rsync -avz --delete \
+  --exclude='backups/' \
+  --exclude='.git/' \
+  --exclude='node_modules/' \
+  --exclude='.venv/' \
+  --exclude='__pycache__/' \
+  ./ "$TARGET_HOST:$TARGET_DIR/"
+
+echo "→ Sincronizando último backup…"
+rsync -avz "$LAST" "$TARGET_HOST:$TARGET_DIR/backups/"
+
+echo "→ Restaurando en destino y arrancando stack…"
+ssh "$TARGET_HOST" "
+  set -e
+  cd $TARGET_DIR
+  if [[ ! -f .env ]]; then
+    echo 'ERROR: .env no existe en $TARGET_HOST:$TARGET_DIR. Copialo y editalo antes de migrar.' >&2
+    exit 1
+  fi
+  docker compose -f docker-compose.prod.yml up -d postgres minio
+  sleep 5
+  ./scripts/restore.sh backups/$(basename $LAST)
+  docker compose -f docker-compose.prod.yml up -d --build
+  sleep 5
+  curl -fsS http://localhost/readyz && echo OK
+"
+
+echo "Migración OK → verificá https://<dominio>/readyz"
+```
+
+Commit:
+```bash
+chmod +x scripts/migrate.sh
+git add scripts/migrate.sh
+git commit -m "feat(ops): scripts/migrate.sh para mover una instalación entre servidores"
+```
+
+---
+
+### Task 11.6: `docs/MIGRATION.md` (runbook)
+
+**Files:**
+- Create: `docs/MIGRATION.md`
+
+```markdown
+# Migración entre servidores
+
+Este runbook está pensado para que Claude Code (o un humano) pueda mover el sistema
+medicia-laboral de un servidor a otro siguiendo pasos secuenciales sin contexto adicional.
+
+## 0) Pre-requisitos en el servidor destino
+
+- Linux x86_64 (Ubuntu 24.04 recomendado)
+- Docker Engine ≥ 25, Docker Compose ≥ v2.27
+- Acceso SSH al servidor desde la máquina origen
+- Puertos 80/443 libres
+- Disco con espacio ≥ 2× el tamaño actual de `backups/`
+- (Opcional) Dominio con DNS apuntando al servidor para TLS automático
+
+## 1) Primera instalación
+
+```bash
+ssh user@servidor
+sudo mkdir -p /opt/medicia-laboral && sudo chown $USER /opt/medicia-laboral
+git clone <repo> /opt/medicia-laboral
+cd /opt/medicia-laboral
+cp .env.example .env
+# Editar .env y completar:
+#  - POSTGRES_PASSWORD
+#  - MINIO_ROOT_PASSWORD
+#  - APP_SECRET_KEY (≥ 32 chars, generar con `openssl rand -hex 24`)
+#  - ADMIN_EMAIL / ADMIN_PASSWORD
+#  - DOMAIN_NAME (si vas a usar TLS auto)
+nano .env
+
+./scripts/bootstrap.sh
+curl -fsS http://localhost/readyz
+```
+
+## 2) Migrar una instalación existente
+
+Desde el servidor origen, con la instalación corriendo:
+
+```bash
+cd /opt/medicia-laboral
+./scripts/migrate.sh user@servidor-destino /opt/medicia-laboral
+```
+
+El script:
+1. Genera un backup local (`./backups/<ts>/`)
+2. Rsync del código al destino
+3. Rsync del backup al destino
+4. SSH al destino: levanta postgres+minio, restaura, levanta el stack completo
+5. Curl `/readyz` para verificar
+
+> Si el destino es un servidor nuevo, primero seguir la "Primera instalación" hasta
+> que `./scripts/bootstrap.sh` termine. Luego `migrate.sh` solo migra los datos.
+
+## 3) Smoke-test post-migración
+
+```bash
+ssh user@servidor-destino "cd /opt/medicia-laboral && curl -fsS http://localhost/readyz"
+# Login con ADMIN_EMAIL/ADMIN_PASSWORD y verificar:
+#   - Listado de empleados
+#   - Listado de licencias
+#   - Una transición (enviar/validar) en una licencia existente
+```
+
+## 4) Backups automáticos
+
+Agregar al cron del host del servidor de producción:
+
+```cron
+0 3 * * * cd /opt/medicia-laboral && ./scripts/backup.sh >> /var/log/medicia-backup.log 2>&1
+```
+
+## 5) Rollback de emergencia
+
+```bash
+cd /opt/medicia-laboral
+docker compose -f docker-compose.prod.yml down
+./scripts/restore.sh ./backups/<timestamp-anterior>
+docker compose -f docker-compose.prod.yml up -d
+```
+```
+
+Commit:
+```bash
+git add docs/MIGRATION.md
+git commit -m "docs(ops): runbook de migración portable para Claude Code"
+```
+
+---
