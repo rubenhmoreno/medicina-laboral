@@ -4431,3 +4431,664 @@ git commit -m "feat(licencias): cómputo de días + ventanas + evaluación de to
 ```
 
 ---
+
+### Task 6.4: Licencia schemas
+
+**Files:**
+- Create: `backend/app/modules/licencias/schemas.py`
+
+- [ ] **Step 1: Write schemas**
+
+```python
+# backend/app/modules/licencias/schemas.py
+from datetime import date, datetime
+from uuid import UUID
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from app.modules.licencias.models import EstadoLicencia, OrigenLicencia
+
+
+class LicenciaCreate(BaseModel):
+    empleado_id: UUID
+    tipo_licencia_id: UUID
+    diagnostico_id: UUID | None = None
+    fecha_desde: date
+    fecha_hasta: date
+    observaciones: str | None = None
+    certificante: str | None = None
+    matricula_certificante: str | None = None
+
+    @field_validator("fecha_hasta")
+    @classmethod
+    def rango_ok(cls, v: date, info):
+        desde: date | None = info.data.get("fecha_desde")
+        if desde and v < desde:
+            raise ValueError("fecha_hasta debe ser >= fecha_desde")
+        return v
+
+
+class LicenciaUpdate(BaseModel):
+    diagnostico_id: UUID | None = None
+    fecha_desde: date | None = None
+    fecha_hasta: date | None = None
+    observaciones: str | None = None
+    certificante: str | None = None
+    matricula_certificante: str | None = None
+
+
+class LicenciaOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: UUID
+    empleado_id: UUID
+    tipo_licencia_id: UUID
+    diagnostico_id: UUID | None
+    fecha_desde: date
+    fecha_hasta: date
+    dias_solicitados: int
+    dias_otorgados: int | None
+    estado: EstadoLicencia
+    origen: OrigenLicencia
+    observaciones: str | None
+    motivo_rechazo: str | None
+    motivo_anulacion: str | None
+    certificante: str | None
+    matricula_certificante: str | None
+    creado_por: UUID
+    validado_por: UUID | None
+    validado_en: datetime | None
+
+
+class ValidarIn(BaseModel):
+    dias_otorgados: int = Field(ge=0)
+    observaciones: str | None = None
+
+
+class RechazarIn(BaseModel):
+    motivo_rechazo: str = Field(min_length=3, max_length=500)
+
+
+class AnularIn(BaseModel):
+    motivo_anulacion: str = Field(min_length=3, max_length=500)
+```
+
+- [ ] **Step 2: Commit (no tests for pure schemas at this step)**
+
+```bash
+git add backend/app/modules/licencias/schemas.py
+git commit -m "feat(licencias): pydantic schemas con validación de rango"
+```
+
+---
+
+### Task 6.5: Licencia repository
+
+**Files:**
+- Create: `backend/app/modules/licencias/repository.py`
+
+- [ ] **Step 1: Write repository**
+
+```python
+# backend/app/modules/licencias/repository.py
+from datetime import date
+from uuid import UUID
+
+from sqlalchemy import and_, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.modules.licencias.models import EstadoLicencia, Licencia
+
+
+async def insert(s: AsyncSession, lic: Licencia) -> Licencia:
+    s.add(lic); await s.flush(); return lic
+
+
+async def get(s: AsyncSession, id_: UUID) -> Licencia | None:
+    return (await s.execute(select(Licencia).where(Licencia.id == id_))).scalar_one_or_none()
+
+
+async def list_(
+    s: AsyncSession,
+    *,
+    estado: EstadoLicencia | None = None,
+    empleado_id: UUID | None = None,
+    area_id: UUID | None = None,
+    desde: date | None = None,
+    hasta: date | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> list[Licencia]:
+    stmt = select(Licencia).order_by(Licencia.fecha_desde.desc()).limit(limit).offset(offset)
+    conds = []
+    if estado:
+        conds.append(Licencia.estado == estado)
+    if empleado_id:
+        conds.append(Licencia.empleado_id == empleado_id)
+    if desde:
+        conds.append(Licencia.fecha_desde >= desde)
+    if hasta:
+        conds.append(Licencia.fecha_desde <= hasta)
+    if conds:
+        stmt = stmt.where(and_(*conds))
+    if area_id:
+        from app.modules.empleados.models import Empleado
+        stmt = stmt.join(Empleado, Empleado.id == Licencia.empleado_id).where(Empleado.area_id == area_id)
+    return list((await s.execute(stmt)).scalars())
+```
+
+- [ ] **Step 2: Commit**
+
+```bash
+git add backend/app/modules/licencias/repository.py
+git commit -m "feat(licencias): repository con filtros (estado, empleado, área, rango)"
+```
+
+---
+
+### Task 6.6: Licencia service (create + transiciones)
+
+**Files:**
+- Create: `backend/app/modules/licencias/service.py`
+- Create: `backend/tests/modules/licencias/test_service.py`
+
+- [ ] **Step 1: Failing tests**
+
+```python
+# backend/tests/modules/licencias/test_service.py
+from datetime import date
+
+import pytest
+
+from app.modules.categorias.schemas import CategoriaCreate
+from app.modules.categorias.service import create_categoria
+from app.modules.empleados.schemas import EmpleadoCreate
+from app.modules.empleados.service import create_empleado
+from app.modules.licencias.models import EstadoLicencia
+from app.modules.licencias.schemas import LicenciaCreate, RechazarIn, ValidarIn
+from app.modules.licencias.service import crear_licencia, enviar, rechazar, validar
+from app.modules.tipos_licencia.schemas import TipoLicenciaCreate
+from app.modules.tipos_licencia.service import create_tipo
+from app.modules.topes import repository as topes_repo
+from app.modules.usuarios.models import Rol
+from app.modules.usuarios.schemas import UsuarioCreate
+from app.modules.usuarios.service import create_user
+from app.shared.exceptions import InvalidStateTransition
+
+
+async def _setup(db_session):
+    rrhh = await create_user(db_session, UsuarioCreate(email="r@r.com", password="StrongPass123!Q", nombre="R", rol=Rol.RRHH))
+    medico = await create_user(db_session, UsuarioCreate(email="m@m.com", password="StrongPass123!Q", nombre="M", rol=Rol.MEDICO))
+    cat = await create_categoria(db_session, CategoriaCreate(codigo="planta", nombre="P"))
+    tipo = await create_tipo(db_session, TipoLicenciaCreate(codigo="ec", nombre="EC"))
+    await db_session.flush()
+    emp = await create_empleado(db_session, EmpleadoCreate(
+        legajo="L1", cuil="20111111119", nombre="A", apellido="B",
+        fecha_ingreso=date(2020, 1, 1), categoria_id=cat.id,
+    ))
+    await topes_repo.set_tope(db_session,
+        categoria_id=cat.id, tipo_licencia_id=tipo.id,
+        dias_maximos=30, ventana="anio-calendario",
+        desde=date(2026, 1, 1), observacion=None,
+    )
+    return rrhh, medico, cat, tipo, emp
+
+
+@pytest.mark.asyncio
+async def test_crear_calcula_dias_y_estado_borrador(db_session):
+    rrhh, _, _, tipo, emp = await _setup(db_session)
+    lic = await crear_licencia(db_session, payload=LicenciaCreate(
+        empleado_id=emp.id, tipo_licencia_id=tipo.id,
+        fecha_desde=date(2026, 5, 10), fecha_hasta=date(2026, 5, 15),
+    ), actor=rrhh)
+    assert lic.dias_solicitados == 6
+    assert lic.estado == EstadoLicencia.BORRADOR
+    assert lic.origen.value == "rrhh"
+
+
+@pytest.mark.asyncio
+async def test_enviar_y_validar_flow(db_session):
+    rrhh, medico, _, tipo, emp = await _setup(db_session)
+    lic = await crear_licencia(db_session, payload=LicenciaCreate(
+        empleado_id=emp.id, tipo_licencia_id=tipo.id,
+        fecha_desde=date(2026, 5, 10), fecha_hasta=date(2026, 5, 15),
+    ), actor=rrhh)
+    lic = await enviar(db_session, lic_id=lic.id, actor=rrhh)
+    assert lic.estado == EstadoLicencia.ENVIADO
+    lic = await validar(db_session, lic_id=lic.id, payload=ValidarIn(dias_otorgados=6), actor=medico)
+    assert lic.estado == EstadoLicencia.VALIDADO
+    assert lic.dias_otorgados == 6
+    assert lic.validado_por == medico.id
+
+
+@pytest.mark.asyncio
+async def test_rechazar_requiere_motivo(db_session):
+    rrhh, medico, _, tipo, emp = await _setup(db_session)
+    lic = await crear_licencia(db_session, payload=LicenciaCreate(
+        empleado_id=emp.id, tipo_licencia_id=tipo.id,
+        fecha_desde=date(2026, 5, 10), fecha_hasta=date(2026, 5, 15),
+    ), actor=rrhh)
+    lic = await enviar(db_session, lic_id=lic.id, actor=rrhh)
+    lic = await rechazar(db_session, lic_id=lic.id, payload=RechazarIn(motivo_rechazo="no corresponde"), actor=medico)
+    assert lic.estado == EstadoLicencia.RECHAZADO
+    assert lic.motivo_rechazo == "no corresponde"
+
+
+@pytest.mark.asyncio
+async def test_validar_borrador_falla(db_session):
+    rrhh, medico, _, tipo, emp = await _setup(db_session)
+    lic = await crear_licencia(db_session, payload=LicenciaCreate(
+        empleado_id=emp.id, tipo_licencia_id=tipo.id,
+        fecha_desde=date(2026, 5, 10), fecha_hasta=date(2026, 5, 15),
+    ), actor=rrhh)
+    with pytest.raises(InvalidStateTransition):
+        await validar(db_session, lic_id=lic.id, payload=ValidarIn(dias_otorgados=6), actor=medico)
+```
+
+- [ ] **Step 2: Implement `service.py`**
+
+```python
+# backend/app/modules/licencias/service.py
+from datetime import datetime, timezone
+from uuid import UUID
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.modules.empleados import repository as emp_repo
+from app.modules.licencias import repository as repo
+from app.modules.licencias.calculo import calcular_dias, evaluar_tope
+from app.modules.licencias.models import EstadoLicencia, Licencia, OrigenLicencia
+from app.modules.licencias.schemas import (
+    AnularIn,
+    LicenciaCreate,
+    RechazarIn,
+    ValidarIn,
+)
+from app.modules.licencias.state_machine import next_state
+from app.modules.usuarios.models import Rol, Usuario
+from app.shared.exceptions import NotFoundError, ValidationError
+
+
+def _origen_for(rol: Rol) -> OrigenLicencia:
+    return OrigenLicencia.MEDICO if rol == Rol.MEDICO else OrigenLicencia.RRHH
+
+
+async def crear_licencia(s: AsyncSession, *, payload: LicenciaCreate, actor: Usuario) -> Licencia:
+    emp = await emp_repo.get(s, payload.empleado_id)
+    if emp is None:
+        raise NotFoundError("empleado no encontrado")
+    dias = calcular_dias(payload.fecha_desde, payload.fecha_hasta)
+    if dias <= 0:
+        raise ValidationError("rango de fechas inválido")
+    lic = Licencia(
+        empleado_id=payload.empleado_id,
+        tipo_licencia_id=payload.tipo_licencia_id,
+        diagnostico_id=payload.diagnostico_id,
+        fecha_desde=payload.fecha_desde,
+        fecha_hasta=payload.fecha_hasta,
+        dias_solicitados=dias,
+        estado=EstadoLicencia.BORRADOR,
+        origen=_origen_for(actor.rol),
+        observaciones=payload.observaciones,
+        certificante=payload.certificante,
+        matricula_certificante=payload.matricula_certificante,
+        creado_por=actor.id,
+    )
+    return await repo.insert(s, lic)
+
+
+async def _transition(
+    s: AsyncSession, *, lic_id: UUID, action: str, actor: Usuario,
+) -> Licencia:
+    lic = await repo.get(s, lic_id)
+    if not lic:
+        raise NotFoundError("licencia no encontrada")
+    lic.estado = next_state(lic.estado, action, actor.rol)
+    await s.flush()
+    return lic
+
+
+async def enviar(s: AsyncSession, *, lic_id: UUID, actor: Usuario) -> Licencia:
+    return await _transition(s, lic_id=lic_id, action="enviar", actor=actor)
+
+
+async def validar(
+    s: AsyncSession, *, lic_id: UUID, payload: ValidarIn, actor: Usuario
+) -> Licencia:
+    lic = await repo.get(s, lic_id)
+    if not lic:
+        raise NotFoundError("licencia no encontrada")
+    lic.estado = next_state(lic.estado, "validar", actor.rol)
+    lic.dias_otorgados = payload.dias_otorgados
+    if payload.observaciones:
+        lic.observaciones = (lic.observaciones or "") + f"\n[validación] {payload.observaciones}"
+    lic.validado_por = actor.id
+    lic.validado_en = datetime.now(timezone.utc)
+    await s.flush()
+    return lic
+
+
+async def rechazar(
+    s: AsyncSession, *, lic_id: UUID, payload: RechazarIn, actor: Usuario
+) -> Licencia:
+    lic = await repo.get(s, lic_id)
+    if not lic:
+        raise NotFoundError("licencia no encontrada")
+    lic.estado = next_state(lic.estado, "rechazar", actor.rol)
+    lic.motivo_rechazo = payload.motivo_rechazo
+    await s.flush()
+    return lic
+
+
+async def anular(
+    s: AsyncSession, *, lic_id: UUID, payload: AnularIn, actor: Usuario
+) -> Licencia:
+    lic = await repo.get(s, lic_id)
+    if not lic:
+        raise NotFoundError("licencia no encontrada")
+    lic.estado = next_state(lic.estado, "anular", actor.rol)
+    lic.motivo_anulacion = payload.motivo_anulacion
+    await s.flush()
+    return lic
+
+
+async def evaluar_tope_para_licencia(
+    s: AsyncSession, lic_id: UUID, fecha_ref=None
+):
+    lic = await repo.get(s, lic_id)
+    if not lic:
+        raise NotFoundError("licencia no encontrada")
+    emp = await emp_repo.get(s, lic.empleado_id)
+    from datetime import date as _date
+    return await evaluar_tope(
+        s,
+        empleado=emp,
+        tipo_licencia_id=lic.tipo_licencia_id,
+        dias_solicitados=lic.dias_solicitados,
+        fecha_ref=fecha_ref or _date.today(),
+    )
+```
+
+- [ ] **Step 3: Run + commit**
+
+```bash
+uv run pytest tests/modules/licencias/test_service.py -v
+git add backend/app/modules/licencias/service.py backend/tests/modules/licencias/test_service.py
+git commit -m "feat(licencias): service con creación + transiciones (enviar/validar/rechazar/anular)"
+```
+
+---
+
+### Task 6.7: Licencia router + endpoints de transición
+
+**Files:**
+- Create: `backend/app/modules/licencias/router.py`
+- Create: `backend/tests/modules/licencias/test_router.py`
+- Modify: `backend/app/main.py`
+
+- [ ] **Step 1: Router**
+
+```python
+# backend/app/modules/licencias/router.py
+from datetime import date
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, Query
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.deps import current_user, get_db
+from app.core.permissions import require_role
+from app.modules.licencias import repository as repo
+from app.modules.licencias.calculo import TopeEvaluacion
+from app.modules.licencias.models import EstadoLicencia
+from app.modules.licencias.schemas import (
+    AnularIn, LicenciaCreate, LicenciaOut, RechazarIn, ValidarIn,
+)
+from app.modules.licencias.service import (
+    anular, crear_licencia, enviar, evaluar_tope_para_licencia, rechazar, validar,
+)
+from app.modules.usuarios.models import Rol, Usuario
+from app.shared.exceptions import NotFoundError
+
+router = APIRouter(prefix="/api/licencias", tags=["licencias"])
+
+
+@router.get("", response_model=list[LicenciaOut])
+async def list_(
+    estado: EstadoLicencia | None = Query(default=None),
+    empleado_id: UUID | None = Query(default=None),
+    area_id: UUID | None = Query(default=None),
+    desde: date | None = Query(default=None),
+    hasta: date | None = Query(default=None),
+    limit: int = Query(default=50, le=200),
+    offset: int = Query(default=0, ge=0),
+    s: AsyncSession = Depends(get_db),
+    user: Usuario = Depends(current_user),
+):
+    rows = await repo.list_(s,
+        estado=estado, empleado_id=empleado_id, area_id=area_id,
+        desde=desde, hasta=hasta, limit=limit, offset=offset)
+    # Hide sensitive fields for RRHH
+    if user.rol == Rol.RRHH:
+        for r in rows:
+            r.diagnostico_id = None
+            r.observaciones = None
+            r.motivo_rechazo = None
+    return rows
+
+
+@router.get("/{id_}", response_model=LicenciaOut)
+async def get_one(id_: UUID, s: AsyncSession = Depends(get_db), user: Usuario = Depends(current_user)):
+    lic = await repo.get(s, id_)
+    if not lic:
+        raise NotFoundError("licencia no encontrada")
+    if user.rol == Rol.RRHH:
+        lic.diagnostico_id = None
+        lic.observaciones = None
+        lic.motivo_rechazo = None
+    return lic
+
+
+@router.post("", response_model=LicenciaOut, status_code=201,
+             dependencies=[Depends(require_role(Rol.ADMIN, Rol.RRHH, Rol.MEDICO))])
+async def create(
+    payload: LicenciaCreate, s: AsyncSession = Depends(get_db), user: Usuario = Depends(current_user)
+):
+    return await crear_licencia(s, payload=payload, actor=user)
+
+
+@router.post("/{id_}/enviar", response_model=LicenciaOut,
+             dependencies=[Depends(require_role(Rol.ADMIN, Rol.RRHH, Rol.MEDICO))])
+async def enviar_ep(id_: UUID, s: AsyncSession = Depends(get_db), user: Usuario = Depends(current_user)):
+    return await enviar(s, lic_id=id_, actor=user)
+
+
+@router.post("/{id_}/validar", response_model=LicenciaOut,
+             dependencies=[Depends(require_role(Rol.MEDICO, Rol.ADMIN))])
+async def validar_ep(
+    id_: UUID, payload: ValidarIn,
+    s: AsyncSession = Depends(get_db), user: Usuario = Depends(current_user),
+):
+    return await validar(s, lic_id=id_, payload=payload, actor=user)
+
+
+@router.post("/{id_}/rechazar", response_model=LicenciaOut,
+             dependencies=[Depends(require_role(Rol.MEDICO, Rol.ADMIN))])
+async def rechazar_ep(
+    id_: UUID, payload: RechazarIn,
+    s: AsyncSession = Depends(get_db), user: Usuario = Depends(current_user),
+):
+    return await rechazar(s, lic_id=id_, payload=payload, actor=user)
+
+
+@router.post("/{id_}/anular", response_model=LicenciaOut,
+             dependencies=[Depends(require_role(Rol.ADMIN))])
+async def anular_ep(
+    id_: UUID, payload: AnularIn,
+    s: AsyncSession = Depends(get_db), user: Usuario = Depends(current_user),
+):
+    return await anular(s, lic_id=id_, payload=payload, actor=user)
+
+
+@router.get("/{id_}/tope")
+async def tope_ep(id_: UUID, s: AsyncSession = Depends(get_db), user: Usuario = Depends(current_user)):
+    ev: TopeEvaluacion = await evaluar_tope_para_licencia(s, id_)
+    return ev.__dict__
+```
+
+- [ ] **Step 2: Router test (E2E sintético)**
+
+```python
+# backend/tests/modules/licencias/test_router.py
+from datetime import date
+
+import pytest
+from httpx import AsyncClient, ASGITransport
+
+from app.core.deps import get_db
+from app.main import create_app
+from app.modules.categorias.schemas import CategoriaCreate
+from app.modules.categorias.service import create_categoria
+from app.modules.empleados.schemas import EmpleadoCreate
+from app.modules.empleados.service import create_empleado
+from app.modules.tipos_licencia.schemas import TipoLicenciaCreate
+from app.modules.tipos_licencia.service import create_tipo
+from app.modules.usuarios.models import Rol
+from app.modules.usuarios.schemas import UsuarioCreate
+from app.modules.usuarios.service import create_user
+
+
+@pytest.mark.asyncio
+async def test_rrhh_no_ve_diagnostico_en_listado(db_session):
+    rrhh = await create_user(db_session, UsuarioCreate(email="r@r.com", password="StrongPass123!Q", nombre="R", rol=Rol.RRHH))
+    cat = await create_categoria(db_session, CategoriaCreate(codigo="p", nombre="P"))
+    tipo = await create_tipo(db_session, TipoLicenciaCreate(codigo="ec", nombre="EC"))
+    await db_session.flush()
+    emp = await create_empleado(db_session, EmpleadoCreate(
+        legajo="L", cuil="20111111119", nombre="A", apellido="B",
+        fecha_ingreso=date(2020,1,1), categoria_id=cat.id))
+    await db_session.flush()
+
+    app = create_app()
+    async def _db(): yield db_session
+    app.dependency_overrides[get_db] = _db
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
+        token = (await ac.post("/api/auth/login", json={"email": "r@r.com", "password": "StrongPass123!Q"})).json()["access_token"]
+        h = {"Authorization": f"Bearer {token}"}
+        await ac.post("/api/licencias", headers=h, json={
+            "empleado_id": str(emp.id), "tipo_licencia_id": str(tipo.id),
+            "fecha_desde": "2026-05-10", "fecha_hasta": "2026-05-15",
+            "observaciones": "secret note",
+        })
+        lst = (await ac.get("/api/licencias", headers=h)).json()
+        assert lst[0]["observaciones"] is None
+```
+
+- [ ] **Step 3: Register router + run + commit**
+
+In `main.py`:
+```python
+from app.modules.licencias.router import router as licencias_router
+app.include_router(licencias_router)
+```
+
+```bash
+uv run pytest tests/modules/licencias/test_router.py -v
+git add backend/app/modules/licencias/router.py backend/tests/modules/licencias/test_router.py backend/app/main.py
+git commit -m "feat(licencias): endpoints CRUD + transiciones + filtrado RRHH de datos sensibles"
+```
+
+---
+
+### Task 6.8: Aplicar @audited a transiciones
+
+**Files:**
+- Modify: `backend/app/modules/licencias/service.py`
+- Create: `backend/tests/modules/licencias/test_audit.py`
+
+- [ ] **Step 1: Failing test**
+
+```python
+# backend/tests/modules/licencias/test_audit.py
+from datetime import date
+
+import pytest
+from sqlalchemy import select
+
+from app.modules.auditoria.models import Auditoria
+from app.modules.categorias.schemas import CategoriaCreate
+from app.modules.categorias.service import create_categoria
+from app.modules.empleados.schemas import EmpleadoCreate
+from app.modules.empleados.service import create_empleado
+from app.modules.licencias.schemas import LicenciaCreate
+from app.modules.licencias.service import crear_licencia, enviar
+from app.modules.tipos_licencia.schemas import TipoLicenciaCreate
+from app.modules.tipos_licencia.service import create_tipo
+from app.modules.usuarios.models import Rol
+from app.modules.usuarios.schemas import UsuarioCreate
+from app.modules.usuarios.service import create_user
+
+
+@pytest.mark.asyncio
+async def test_state_change_genera_audit(db_session):
+    rrhh = await create_user(db_session, UsuarioCreate(email="r@r.com", password="StrongPass123!Q", nombre="R", rol=Rol.RRHH))
+    cat = await create_categoria(db_session, CategoriaCreate(codigo="p", nombre="P"))
+    tipo = await create_tipo(db_session, TipoLicenciaCreate(codigo="ec", nombre="EC"))
+    await db_session.flush()
+    emp = await create_empleado(db_session, EmpleadoCreate(
+        legajo="L", cuil="20111111119", nombre="A", apellido="B",
+        fecha_ingreso=date(2020,1,1), categoria_id=cat.id))
+    await db_session.flush()
+    lic = await crear_licencia(db_session, payload=LicenciaCreate(
+        empleado_id=emp.id, tipo_licencia_id=tipo.id,
+        fecha_desde=date(2026,5,10), fecha_hasta=date(2026,5,15),
+    ), actor=rrhh)
+    await enviar(db_session, lic_id=lic.id, actor=rrhh)
+    rows = (await db_session.execute(select(Auditoria))).scalars().all()
+    assert any(a.accion == "state_change" and a.entidad == "licencia" for a in rows)
+```
+
+- [ ] **Step 2: Wire `audit_repo.append` calls into service transitions**
+
+In `backend/app/modules/licencias/service.py`, add at the top:
+```python
+from app.modules.auditoria import repository as audit_repo
+```
+
+Refactor each transition to write an explicit audit row instead of relying solely on the generic decorator (because we need to record the `from→to` payload accurately, which the decorator can't infer):
+
+```python
+async def _record_state_change(
+    s: AsyncSession, *, lic: Licencia, frm: EstadoLicencia, to: EstadoLicencia, actor: Usuario, extra: dict | None = None
+) -> None:
+    payload = {"from": frm.value, "to": to.value}
+    if extra:
+        payload.update(extra)
+    await audit_repo.append(
+        s, accion="state_change", entidad="licencia",
+        usuario_id=actor.id, entidad_id=lic.id, payload=payload,
+        ip=None, user_agent=None,
+    )
+```
+
+Then in `enviar`:
+```python
+async def enviar(s, *, lic_id, actor):
+    lic = await repo.get(s, lic_id)
+    if not lic: raise NotFoundError("licencia no encontrada")
+    frm = lic.estado
+    lic.estado = next_state(frm, "enviar", actor.rol)
+    await s.flush()
+    await _record_state_change(s, lic=lic, frm=frm, to=lic.estado, actor=actor)
+    return lic
+```
+
+Repeat the same pattern in `validar`, `rechazar`, `anular` (include `dias_otorgados` / `motivo_rechazo` / `motivo_anulacion` in `extra`).
+
+- [ ] **Step 3: Run + commit**
+
+```bash
+uv run pytest tests/modules/licencias/test_audit.py -v
+git add backend/app/modules/licencias/service.py backend/tests/modules/licencias/test_audit.py
+git commit -m "feat(licencias): persiste state_change en auditoría con payload from/to"
+```
+
+---
