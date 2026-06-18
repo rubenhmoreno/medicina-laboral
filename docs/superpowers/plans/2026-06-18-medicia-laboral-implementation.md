@@ -3977,3 +3977,457 @@ git commit -m "feat(adjuntos): upload con sha256 + presigned download (migració
 Register router; **do NOT** add adjuntos to `alembic/env.py` yet — wait until Phase 6 Task 6.1 lands the `licencias` table so the FK resolves.
 
 ---
+
+## Phase 6 — Licencias (state machine + cómputo + topes)
+
+### Task 6.1: Licencia model + migration (and finally adjuntos)
+
+**Files:**
+- Create: `backend/app/modules/licencias/{__init__,models}.py`
+- Migration
+
+- [ ] **Step 1: Model**
+
+```python
+# backend/app/modules/licencias/models.py
+from datetime import date, datetime
+from enum import StrEnum
+from uuid import UUID
+
+from sqlalchemy import CheckConstraint, Date, DateTime, Enum as SAEnum, ForeignKey, Integer, String, func
+from sqlalchemy.dialects.postgresql import UUID as PgUUID
+from sqlalchemy.orm import Mapped, mapped_column
+
+from app.core.db_base import Base
+from app.core.ids import new_uuid7
+
+
+class EstadoLicencia(StrEnum):
+    BORRADOR = "borrador"
+    ENVIADO = "enviado"
+    VALIDADO = "validado"
+    RECHAZADO = "rechazado"
+    ANULADO = "anulado"
+
+
+class OrigenLicencia(StrEnum):
+    RRHH = "rrhh"
+    MEDICO = "medico"
+
+
+class Licencia(Base):
+    __tablename__ = "licencias"
+    __table_args__ = (
+        CheckConstraint("dias_solicitados > 0", name="ck_dias_sol_positivo"),
+        CheckConstraint("fecha_hasta >= fecha_desde", name="ck_rango_fechas"),
+    )
+
+    id: Mapped[UUID] = mapped_column(PgUUID(as_uuid=True), primary_key=True, default=new_uuid7)
+    empleado_id: Mapped[UUID] = mapped_column(PgUUID(as_uuid=True), ForeignKey("empleados.id"))
+    tipo_licencia_id: Mapped[UUID] = mapped_column(PgUUID(as_uuid=True), ForeignKey("tipos_licencia.id"))
+    diagnostico_id: Mapped[UUID | None] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("diagnosticos.id"), nullable=True
+    )
+    fecha_desde: Mapped[date] = mapped_column(Date)
+    fecha_hasta: Mapped[date] = mapped_column(Date)
+    dias_solicitados: Mapped[int] = mapped_column(Integer)
+    dias_otorgados: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    estado: Mapped[EstadoLicencia] = mapped_column(SAEnum(EstadoLicencia, name="estado_licencia"))
+    origen: Mapped[OrigenLicencia] = mapped_column(SAEnum(OrigenLicencia, name="origen_licencia"))
+    observaciones: Mapped[str | None] = mapped_column(String(2000), nullable=True)
+    motivo_rechazo: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    motivo_anulacion: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    certificante: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    matricula_certificante: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    creado_por: Mapped[UUID] = mapped_column(PgUUID(as_uuid=True), ForeignKey("usuarios.id"))
+    validado_por: Mapped[UUID | None] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("usuarios.id"), nullable=True
+    )
+    validado_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+```
+
+- [ ] **Step 2: Migration including indexes + adjuntos**
+
+Now wire imports in `alembic/env.py`:
+```python
+from app.modules.licencias import models as _lic_models  # noqa: F401
+from app.modules.adjuntos import models as _adj_models   # noqa: F401
+```
+
+Generate and edit revision to add the auxiliary indexes:
+
+```bash
+cd backend && uv run alembic revision --autogenerate -m "licencias and adjuntos"
+```
+
+In the new revision file, append at the end of `upgrade()`:
+
+```python
+op.execute("""
+    CREATE INDEX IF NOT EXISTS ix_lic_empleado_desde
+        ON licencias (empleado_id, fecha_desde);
+""")
+op.execute("""
+    CREATE INDEX IF NOT EXISTS ix_lic_estado
+        ON licencias (estado);
+""")
+op.execute("""
+    CREATE INDEX IF NOT EXISTS ix_lic_tipo_validado
+        ON licencias (tipo_licencia_id, validado_en)
+        WHERE estado = 'validado';
+""")
+```
+
+Apply:
+```bash
+uv run alembic upgrade head
+```
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add backend/app/modules/licencias/models.py backend/alembic/versions backend/alembic/env.py
+git commit -m "feat(licencias): modelo + migración (con índices) + adjuntos"
+```
+
+---
+
+### Task 6.2: State machine
+
+**Files:**
+- Create: `backend/app/modules/licencias/state_machine.py`
+- Create: `backend/tests/modules/licencias/{__init__,test_state_machine}.py`
+
+- [ ] **Step 1: Failing tests (matriz completa)**
+
+```python
+# backend/tests/modules/licencias/test_state_machine.py
+import pytest
+
+from app.modules.licencias.models import EstadoLicencia
+from app.modules.licencias.state_machine import (
+    can_transition,
+    next_state,
+)
+from app.modules.usuarios.models import Rol
+from app.shared.exceptions import InvalidStateTransition
+
+E = EstadoLicencia
+
+ALLOWED = [
+    # (from, to, role, ok?)
+    (E.BORRADOR, E.ENVIADO, Rol.RRHH, True),
+    (E.BORRADOR, E.ENVIADO, Rol.MEDICO, True),
+    (E.BORRADOR, E.ANULADO, Rol.RRHH, True),
+    (E.BORRADOR, E.ANULADO, Rol.ADMIN, True),
+    (E.ENVIADO, E.VALIDADO, Rol.MEDICO, True),
+    (E.ENVIADO, E.VALIDADO, Rol.RRHH, False),
+    (E.ENVIADO, E.RECHAZADO, Rol.MEDICO, True),
+    (E.VALIDADO, E.ANULADO, Rol.ADMIN, True),
+    (E.VALIDADO, E.ANULADO, Rol.MEDICO, False),
+    (E.RECHAZADO, E.BORRADOR, Rol.ADMIN, True),
+    (E.RECHAZADO, E.VALIDADO, Rol.ADMIN, False),  # bypass not allowed
+    (E.ANULADO, E.BORRADOR, Rol.ADMIN, False),
+]
+
+
+@pytest.mark.parametrize("frm,to,role,ok", ALLOWED)
+def test_matrix(frm, to, role, ok):
+    if ok:
+        assert can_transition(frm, to, role) is True
+    else:
+        assert can_transition(frm, to, role) is False
+
+
+def test_next_state_raises_on_illegal():
+    with pytest.raises(InvalidStateTransition):
+        next_state(E.VALIDADO, "enviar", Rol.MEDICO)
+
+
+def test_next_state_handles_enviar():
+    assert next_state(E.BORRADOR, "enviar", Rol.RRHH) is E.ENVIADO
+    assert next_state(E.ENVIADO, "validar", Rol.MEDICO) is E.VALIDADO
+    assert next_state(E.ENVIADO, "rechazar", Rol.MEDICO) is E.RECHAZADO
+    assert next_state(E.VALIDADO, "anular", Rol.ADMIN) is E.ANULADO
+    assert next_state(E.RECHAZADO, "reabrir", Rol.ADMIN) is E.BORRADOR
+```
+
+- [ ] **Step 2: Implement `state_machine.py`**
+
+```python
+# backend/app/modules/licencias/state_machine.py
+from app.modules.licencias.models import EstadoLicencia as E
+from app.modules.usuarios.models import Rol
+from app.shared.exceptions import InvalidStateTransition
+
+# (from, to) -> roles allowed
+_RULES: dict[tuple[E, E], set[Rol]] = {
+    (E.BORRADOR, E.ENVIADO):   {Rol.RRHH, Rol.MEDICO, Rol.ADMIN},
+    (E.BORRADOR, E.ANULADO):   {Rol.RRHH, Rol.MEDICO, Rol.ADMIN},
+    (E.ENVIADO,  E.VALIDADO):  {Rol.MEDICO, Rol.ADMIN},
+    (E.ENVIADO,  E.RECHAZADO): {Rol.MEDICO, Rol.ADMIN},
+    (E.VALIDADO, E.ANULADO):   {Rol.ADMIN},
+    (E.RECHAZADO, E.BORRADOR): {Rol.ADMIN},
+}
+
+# Map action name → target state.
+_ACTIONS = {
+    "enviar":   E.ENVIADO,
+    "validar":  E.VALIDADO,
+    "rechazar": E.RECHAZADO,
+    "anular":   E.ANULADO,
+    "reabrir":  E.BORRADOR,
+}
+
+
+def can_transition(from_state: E, to_state: E, role: Rol) -> bool:
+    return role in _RULES.get((from_state, to_state), set())
+
+
+def next_state(current: E, action: str, role: Rol) -> E:
+    if action not in _ACTIONS:
+        raise InvalidStateTransition(f"acción desconocida: {action}")
+    target = _ACTIONS[action]
+    if not can_transition(current, target, role):
+        raise InvalidStateTransition(
+            f"transición {current.value} → {target.value} no permitida para rol {role.value}",
+            detail={"from": current.value, "to": target.value, "role": role.value},
+        )
+    return target
+```
+
+> The `ADMIN` is added to medical actions because admin has system-wide rights; medic-only enforcement is at the *router level* via `require_role`, not the state machine.
+
+- [ ] **Step 3: Run + commit**
+
+```bash
+cd backend && uv run pytest tests/modules/licencias/test_state_machine.py -v
+git add backend/app/modules/licencias/state_machine.py backend/tests/modules/licencias/test_state_machine.py
+git commit -m "feat(licencias): state machine con matriz de transiciones y roles"
+```
+
+---
+
+### Task 6.3: Cómputo de días + evaluación de tope
+
+**Files:**
+- Create: `backend/app/modules/licencias/calculo.py`
+- Create: `backend/tests/modules/licencias/test_calculo.py`
+
+- [ ] **Step 1: Failing tests**
+
+```python
+# backend/tests/modules/licencias/test_calculo.py
+from datetime import date
+
+import pytest
+
+from app.modules.licencias.calculo import calcular_dias, ventana_para
+
+
+def test_calcular_dias_dia_unico():
+    assert calcular_dias(date(2026, 5, 10), date(2026, 5, 10)) == 1
+
+
+def test_calcular_dias_rango_normal():
+    assert calcular_dias(date(2026, 5, 10), date(2026, 5, 20)) == 11
+
+
+def test_calcular_dias_rango_invalido():
+    with pytest.raises(ValueError):
+        calcular_dias(date(2026, 5, 20), date(2026, 5, 10))
+
+
+def test_calcular_dias_anio_bisiesto():
+    # 2024 es bisiesto; feb 28 → mar 1 son 3 días corridos
+    assert calcular_dias(date(2024, 2, 28), date(2024, 3, 1)) == 3
+
+
+def test_ventana_calendario():
+    assert ventana_para("anio-calendario", fecha_ingreso=date(2020, 7, 1), fecha_ref=date(2026, 6, 15)) == (
+        date(2026, 1, 1), date(2026, 12, 31)
+    )
+
+
+def test_ventana_aniversario():
+    # ingresó 1-feb-2020, fecha_ref 15-jun-2026 → ventana 1-feb-2026 a 31-ene-2027
+    assert ventana_para("anio-aniversario", fecha_ingreso=date(2020, 2, 1), fecha_ref=date(2026, 6, 15)) == (
+        date(2026, 2, 1), date(2027, 1, 31)
+    )
+```
+
+- [ ] **Step 2: Implement `calculo.py`**
+
+```python
+# backend/app/modules/licencias/calculo.py
+from dataclasses import dataclass
+from datetime import date, timedelta
+from uuid import UUID
+
+from sqlalchemy import and_, func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.modules.empleados.models import Empleado
+from app.modules.licencias.models import EstadoLicencia, Licencia
+from app.modules.topes import repository as topes_repo
+
+
+def calcular_dias(fecha_desde: date, fecha_hasta: date) -> int:
+    if fecha_hasta < fecha_desde:
+        raise ValueError("fecha_hasta < fecha_desde")
+    return (fecha_hasta - fecha_desde).days + 1
+
+
+def ventana_para(
+    ventana: str, *, fecha_ingreso: date, fecha_ref: date
+) -> tuple[date, date]:
+    if ventana == "anio-calendario":
+        return date(fecha_ref.year, 1, 1), date(fecha_ref.year, 12, 31)
+    if ventana == "anio-aniversario":
+        # Determine the current aniversario "year start" relative to fecha_ref.
+        anios = fecha_ref.year - fecha_ingreso.year
+        if (fecha_ref.month, fecha_ref.day) < (fecha_ingreso.month, fecha_ingreso.day):
+            anios -= 1
+        try:
+            inicio = fecha_ingreso.replace(year=fecha_ingreso.year + anios)
+        except ValueError:
+            # 29-feb edge: fall back to 28-feb in non-leap years
+            inicio = date(fecha_ingreso.year + anios, 2, 28)
+        try:
+            fin = inicio.replace(year=inicio.year + 1) - timedelta(days=1)
+        except ValueError:
+            fin = date(inicio.year + 1, 2, 28) - timedelta(days=1)
+        return inicio, fin
+    raise ValueError(f"ventana desconocida: {ventana}")
+
+
+@dataclass(frozen=True)
+class TopeEvaluacion:
+    tope_aplicable: int | None
+    dias_consumidos_ventana: int
+    dias_restantes: int
+    excede: bool
+    warning_msg: str | None
+
+
+async def dias_consumidos(
+    s: AsyncSession,
+    *,
+    empleado_id: UUID,
+    tipo_licencia_id: UUID,
+    inicio: date,
+    fin: date,
+) -> int:
+    stmt = (
+        select(func.coalesce(func.sum(Licencia.dias_otorgados), 0))
+        .where(
+            and_(
+                Licencia.empleado_id == empleado_id,
+                Licencia.tipo_licencia_id == tipo_licencia_id,
+                Licencia.estado == EstadoLicencia.VALIDADO,
+                Licencia.fecha_desde >= inicio,
+                Licencia.fecha_desde <= fin,
+            )
+        )
+    )
+    return int((await s.execute(stmt)).scalar_one() or 0)
+
+
+async def evaluar_tope(
+    s: AsyncSession,
+    *,
+    empleado: Empleado,
+    tipo_licencia_id: UUID,
+    dias_solicitados: int,
+    fecha_ref: date,
+) -> TopeEvaluacion:
+    tope = await topes_repo.tope_vigente(
+        s, categoria_id=empleado.categoria_id, tipo_licencia_id=tipo_licencia_id, en_fecha=fecha_ref
+    )
+    if tope is None or tope.ventana == "sin-limite":
+        return TopeEvaluacion(None, 0, 0, False, None)
+
+    inicio, fin = ventana_para(tope.ventana, fecha_ingreso=empleado.fecha_ingreso, fecha_ref=fecha_ref)
+    consumidos = await dias_consumidos(
+        s, empleado_id=empleado.id, tipo_licencia_id=tipo_licencia_id, inicio=inicio, fin=fin
+    )
+    excede = (consumidos + dias_solicitados) > tope.dias_maximos
+    return TopeEvaluacion(
+        tope_aplicable=tope.dias_maximos,
+        dias_consumidos_ventana=consumidos,
+        dias_restantes=max(0, tope.dias_maximos - consumidos),
+        excede=excede,
+        warning_msg=(
+            f"Excede tope ({consumidos + dias_solicitados}/{tope.dias_maximos})" if excede else None
+        ),
+    )
+```
+
+- [ ] **Step 3: Run unit tests for calcular/ventana**
+
+Run: `cd backend && uv run pytest tests/modules/licencias/test_calculo.py -v`
+Expected: 6 passed.
+
+- [ ] **Step 4: Integration test for `evaluar_tope`**
+
+```python
+# backend/tests/modules/licencias/test_evaluar_tope.py
+from datetime import date
+
+import pytest
+
+from app.modules.categorias.schemas import CategoriaCreate
+from app.modules.categorias.service import create_categoria
+from app.modules.empleados.schemas import EmpleadoCreate
+from app.modules.empleados.service import create_empleado
+from app.modules.licencias.calculo import evaluar_tope
+from app.modules.licencias.models import EstadoLicencia, Licencia, OrigenLicencia
+from app.modules.tipos_licencia.schemas import TipoLicenciaCreate
+from app.modules.tipos_licencia.service import create_tipo
+from app.modules.topes import repository as topes_repo
+
+
+@pytest.mark.asyncio
+async def test_excede_tope_calendario_con_licencias_previas(db_session):
+    cat = await create_categoria(db_session, CategoriaCreate(codigo="planta", nombre="P"))
+    tipo = await create_tipo(db_session, TipoLicenciaCreate(codigo="ec", nombre="EC"))
+    await db_session.flush()
+    emp = await create_empleado(db_session, EmpleadoCreate(
+        legajo="L", cuil="20111111119", nombre="A", apellido="B",
+        fecha_ingreso=date(2020, 1, 1), categoria_id=cat.id,
+    ))
+    await topes_repo.set_tope(db_session,
+        categoria_id=cat.id, tipo_licencia_id=tipo.id,
+        dias_maximos=30, ventana="anio-calendario",
+        desde=date(2026, 1, 1), observacion=None,
+    )
+    # 20 días ya otorgados en este año.
+    db_session.add(Licencia(
+        empleado_id=emp.id, tipo_licencia_id=tipo.id,
+        fecha_desde=date(2026, 3, 1), fecha_hasta=date(2026, 3, 20),
+        dias_solicitados=20, dias_otorgados=20,
+        estado=EstadoLicencia.VALIDADO, origen=OrigenLicencia.RRHH,
+        creado_por=emp.id,  # placeholder; in real code uses Usuario
+    ))
+    await db_session.flush()
+
+    ev = await evaluar_tope(db_session,
+        empleado=emp, tipo_licencia_id=tipo.id, dias_solicitados=15, fecha_ref=date(2026, 6, 1))
+    assert ev.tope_aplicable == 30
+    assert ev.dias_consumidos_ventana == 20
+    assert ev.excede is True
+```
+
+> The `creado_por` FK trick (using `emp.id` as a placeholder UUID) is only for this unit-style fixture — production data always uses a real `usuarios.id`. Adjust if FK strictness blocks; otherwise use `factory-boy` to create a real Usuario fixture.
+
+- [ ] **Step 5: Run + commit**
+
+```bash
+uv run pytest tests/modules/licencias -v
+git add backend/app/modules/licencias/calculo.py backend/tests/modules/licencias
+git commit -m "feat(licencias): cómputo de días + ventanas + evaluación de tope versionado"
+```
+
+---
