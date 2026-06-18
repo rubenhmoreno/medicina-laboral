@@ -5360,3 +5360,408 @@ git commit -m "feat(reportes): agregados por área, categoría diagnóstico, men
 ```
 
 ---
+
+## Phase 8 — Frontend foundation (API client, auth, routing, layout)
+
+### Task 8.1: Tailwind + shadcn base
+
+**Files:**
+- Create: `frontend/tailwind.config.ts`
+- Create: `frontend/postcss.config.js`
+- Create: `frontend/src/index.css`
+- Modify: `frontend/src/main.tsx`
+- Create: `frontend/src/lib/utils.ts`
+
+- [ ] **Step 1: Tailwind config**
+
+```ts
+// frontend/tailwind.config.ts
+import type { Config } from "tailwindcss";
+
+export default {
+  content: ["./index.html", "./src/**/*.{ts,tsx}"],
+  theme: { extend: {} },
+  plugins: [],
+} satisfies Config;
+```
+
+- [ ] **Step 2: PostCSS + index.css**
+
+```js
+// frontend/postcss.config.js
+export default { plugins: { tailwindcss: {}, autoprefixer: {} } };
+```
+
+```css
+/* frontend/src/index.css */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+```
+
+- [ ] **Step 3: Import css in `main.tsx`**
+
+```tsx
+import "./index.css";
+```
+
+- [ ] **Step 4: `cn` utility**
+
+```ts
+// frontend/src/lib/utils.ts
+import { clsx, type ClassValue } from "clsx";
+import { twMerge } from "tailwind-merge";
+
+export function cn(...inputs: ClassValue[]) {
+  return twMerge(clsx(inputs));
+}
+```
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add frontend/tailwind.config.ts frontend/postcss.config.js frontend/src/index.css frontend/src/main.tsx frontend/src/lib/utils.ts
+git commit -m "feat(frontend): tailwind base + cn util"
+```
+
+---
+
+### Task 8.2: Generate OpenAPI client + axios instance
+
+**Files:**
+- Create: `frontend/src/api/http.ts`
+- Run: `pnpm gen:api` (after backend boots)
+
+- [ ] **Step 1: HTTP instance with token injection**
+
+```ts
+// frontend/src/api/http.ts
+import axios, { type AxiosInstance } from "axios";
+
+const BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
+
+let accessToken: string | null = null;
+let onUnauthorized: (() => void) | null = null;
+
+export function setAccessToken(token: string | null) {
+  accessToken = token;
+}
+
+export function setOnUnauthorized(fn: () => void) {
+  onUnauthorized = fn;
+}
+
+export const http: AxiosInstance = axios.create({ baseURL: BASE });
+
+http.interceptors.request.use((cfg) => {
+  if (accessToken) cfg.headers.Authorization = `Bearer ${accessToken}`;
+  return cfg;
+});
+
+http.interceptors.response.use(
+  (r) => r,
+  (err) => {
+    if (err?.response?.status === 401 && onUnauthorized) onUnauthorized();
+    return Promise.reject(err);
+  },
+);
+```
+
+- [ ] **Step 2: Generate the API client**
+
+```bash
+cd frontend
+# 1) make sure backend is running: docker compose up -d && cd ../backend && uv run uvicorn app.main:app &
+pnpm gen:api
+```
+
+This writes typed services under `src/api/services/*Service.ts` and models under `src/api/models/*.ts`.
+
+- [ ] **Step 3: Configure generated `OpenAPI` to point at http instance**
+
+In `src/api/core/request.ts` (or wherever the generator places it), inject the axios instance from `http.ts` so all calls share the bearer token. Simpler alternative: write thin wrappers per resource that call `http` directly.
+
+For v1 we'll **bypass the generator** and just write hand-rolled clients (less fragile, fewer surprises with codegen options). Replace step 2 with:
+
+```ts
+// frontend/src/api/auth.ts
+import { http } from "./http";
+
+export type TokenPair = { access_token: string; refresh_token: string; token_type: "bearer" };
+export type Me = { id: string; email: string; nombre: string | null; rol: "admin"|"medico"|"rrhh"; matricula: string|null; activo: boolean };
+
+export const authApi = {
+  login: (email: string, password: string) =>
+    http.post<TokenPair>("/api/auth/login", { email, password }).then((r) => r.data),
+  refresh: (refresh_token: string) =>
+    http.post<TokenPair>("/api/auth/refresh", null, { params: { refresh_token } }).then((r) => r.data),
+  me: () => http.get<Me>("/api/auth/me").then((r) => r.data),
+};
+```
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add frontend/src/api
+git commit -m "feat(frontend): axios http client + hand-rolled auth API client"
+```
+
+---
+
+### Task 8.3: Auth context + protected routes
+
+**Files:**
+- Create: `frontend/src/auth/AuthContext.tsx`
+- Create: `frontend/src/auth/ProtectedRoute.tsx`
+- Create: `frontend/src/routes/login.tsx`
+- Modify: `frontend/src/App.tsx`
+
+- [ ] **Step 1: Auth context**
+
+```tsx
+// frontend/src/auth/AuthContext.tsx
+import {
+  createContext, useCallback, useContext, useEffect, useMemo, useState,
+  type ReactNode,
+} from "react";
+import { authApi, type Me } from "@/api/auth";
+import { setAccessToken, setOnUnauthorized } from "@/api/http";
+
+type AuthState = {
+  user: Me | null;
+  ready: boolean;
+  login: (email: string, password: string) => Promise<void>;
+  logout: () => void;
+};
+
+const Ctx = createContext<AuthState | null>(null);
+
+const ACCESS_KEY = "med:access";
+const REFRESH_KEY = "med:refresh";
+
+export function AuthProvider({ children }: { children: ReactNode }) {
+  const [user, setUser] = useState<Me | null>(null);
+  const [ready, setReady] = useState(false);
+
+  const logout = useCallback(() => {
+    localStorage.removeItem(ACCESS_KEY);
+    localStorage.removeItem(REFRESH_KEY);
+    setAccessToken(null);
+    setUser(null);
+  }, []);
+
+  useEffect(() => {
+    setOnUnauthorized(() => logout());
+    const access = localStorage.getItem(ACCESS_KEY);
+    if (access) {
+      setAccessToken(access);
+      authApi.me().then(setUser).catch(logout).finally(() => setReady(true));
+    } else {
+      setReady(true);
+    }
+  }, [logout]);
+
+  const login = useCallback(async (email: string, password: string) => {
+    const tokens = await authApi.login(email, password);
+    localStorage.setItem(ACCESS_KEY, tokens.access_token);
+    localStorage.setItem(REFRESH_KEY, tokens.refresh_token);
+    setAccessToken(tokens.access_token);
+    setUser(await authApi.me());
+  }, []);
+
+  const value = useMemo<AuthState>(() => ({ user, ready, login, logout }), [user, ready, login, logout]);
+  return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
+}
+
+export function useAuth() {
+  const v = useContext(Ctx);
+  if (!v) throw new Error("useAuth outside provider");
+  return v;
+}
+```
+
+- [ ] **Step 2: Protected route**
+
+```tsx
+// frontend/src/auth/ProtectedRoute.tsx
+import { Navigate, Outlet } from "react-router-dom";
+import { useAuth } from "./AuthContext";
+
+export function ProtectedRoute({ roles }: { roles?: Array<"admin"|"medico"|"rrhh"> }) {
+  const { user, ready } = useAuth();
+  if (!ready) return <div className="p-6">Cargando…</div>;
+  if (!user) return <Navigate to="/login" replace />;
+  if (roles && !roles.includes(user.rol)) return <Navigate to="/" replace />;
+  return <Outlet />;
+}
+```
+
+- [ ] **Step 3: Login page**
+
+```tsx
+// frontend/src/routes/login.tsx
+import { useState, type FormEvent } from "react";
+import { useNavigate } from "react-router-dom";
+import { useAuth } from "@/auth/AuthContext";
+
+export default function LoginPage() {
+  const { login } = useAuth();
+  const nav = useNavigate();
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  async function onSubmit(e: FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setLoading(true);
+    try {
+      await login(email, password);
+      nav("/");
+    } catch {
+      setError("Credenciales inválidas o cuenta bloqueada.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <main className="min-h-screen grid place-items-center bg-slate-50">
+      <form onSubmit={onSubmit} className="w-80 space-y-3 bg-white p-6 rounded shadow">
+        <h1 className="text-xl font-semibold">Medicia-Laboral</h1>
+        <label className="block text-sm">
+          Email
+          <input className="mt-1 w-full border rounded p-2" type="email" value={email}
+                 onChange={(e) => setEmail(e.target.value)} required />
+        </label>
+        <label className="block text-sm">
+          Contraseña
+          <input className="mt-1 w-full border rounded p-2" type="password" value={password}
+                 onChange={(e) => setPassword(e.target.value)} required minLength={12} />
+        </label>
+        {error && <p className="text-red-600 text-sm">{error}</p>}
+        <button disabled={loading} className="w-full bg-slate-900 text-white rounded p-2">
+          {loading ? "Ingresando…" : "Ingresar"}
+        </button>
+      </form>
+    </main>
+  );
+}
+```
+
+- [ ] **Step 4: Wire `App.tsx` with router**
+
+```tsx
+// frontend/src/App.tsx
+import { BrowserRouter, Route, Routes } from "react-router-dom";
+import { AuthProvider } from "./auth/AuthContext";
+import { ProtectedRoute } from "./auth/ProtectedRoute";
+import LoginPage from "./routes/login";
+import { AppLayout } from "./layout/AppLayout";
+import { DashboardPage } from "./routes/dashboard";
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <BrowserRouter>
+        <Routes>
+          <Route path="/login" element={<LoginPage />} />
+          <Route element={<ProtectedRoute />}>
+            <Route element={<AppLayout />}>
+              <Route path="/" element={<DashboardPage />} />
+            </Route>
+          </Route>
+        </Routes>
+      </BrowserRouter>
+    </AuthProvider>
+  );
+}
+```
+
+- [ ] **Step 5: Commit (layout + dashboard come in next task — file will not yet exist; that's expected)**
+
+```bash
+git add frontend/src/auth frontend/src/routes/login.tsx frontend/src/App.tsx
+git commit -m "feat(frontend): auth context + protected routes + login page"
+```
+
+---
+
+### Task 8.4: Layout shell
+
+**Files:**
+- Create: `frontend/src/layout/AppLayout.tsx`
+- Create: `frontend/src/routes/dashboard.tsx`
+
+- [ ] **Step 1: Layout**
+
+```tsx
+// frontend/src/layout/AppLayout.tsx
+import { NavLink, Outlet } from "react-router-dom";
+import { useAuth } from "@/auth/AuthContext";
+
+const links = [
+  { to: "/", label: "Inicio", roles: ["admin", "medico", "rrhh"] as const },
+  { to: "/empleados", label: "Empleados", roles: ["admin", "medico", "rrhh"] as const },
+  { to: "/licencias", label: "Licencias", roles: ["admin", "medico", "rrhh"] as const },
+  { to: "/reportes", label: "Reportes", roles: ["admin", "medico", "rrhh"] as const },
+  { to: "/admin/topes", label: "Topes", roles: ["admin"] as const },
+  { to: "/admin/usuarios", label: "Usuarios", roles: ["admin"] as const },
+];
+
+export function AppLayout() {
+  const { user, logout } = useAuth();
+  if (!user) return null;
+  return (
+    <div className="min-h-screen grid grid-cols-[220px_1fr]">
+      <aside className="bg-slate-900 text-slate-100 p-4 space-y-2">
+        <div className="font-bold mb-4">Medicia-Laboral</div>
+        {links.filter((l) => l.roles.includes(user.rol)).map((l) => (
+          <NavLink key={l.to} to={l.to}
+                   className={({ isActive }) =>
+                     `block px-3 py-2 rounded ${isActive ? "bg-slate-700" : "hover:bg-slate-800"}`}>
+            {l.label}
+          </NavLink>
+        ))}
+        <div className="absolute bottom-4 left-4 right-4 text-xs">
+          <div className="opacity-70">{user.email}</div>
+          <button onClick={logout} className="mt-2 underline">Salir</button>
+        </div>
+      </aside>
+      <main className="p-6 bg-slate-50">
+        <Outlet />
+      </main>
+    </div>
+  );
+}
+```
+
+- [ ] **Step 2: Dashboard skeleton**
+
+```tsx
+// frontend/src/routes/dashboard.tsx
+import { useAuth } from "@/auth/AuthContext";
+
+export function DashboardPage() {
+  const { user } = useAuth();
+  return (
+    <section className="space-y-3">
+      <h1 className="text-2xl font-semibold">Bienvenido, {user?.nombre ?? user?.email}</h1>
+      <p className="text-slate-600">Rol: {user?.rol}</p>
+    </section>
+  );
+}
+```
+
+- [ ] **Step 3: Verify + commit**
+
+```bash
+pnpm typecheck
+pnpm dev &  # spot-check http://localhost:5173/login → login → dashboard
+sleep 5 && kill %1
+git add frontend/src/layout frontend/src/routes/dashboard.tsx
+git commit -m "feat(frontend): layout shell con menú por rol + dashboard skeleton"
+```
+
+---
