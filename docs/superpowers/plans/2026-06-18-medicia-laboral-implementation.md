@@ -7215,3 +7215,328 @@ git commit -m "docs(ops): runbook de migración portable para Claude Code"
 ```
 
 ---
+
+## Phase 12 — Despliegue de producción (nginx + TLS + seguridad)
+
+### Task 12.1: `frontend/Dockerfile` (build estático)
+
+**Files:**
+- Create: `frontend/Dockerfile`
+
+```dockerfile
+# frontend/Dockerfile — build estático servido luego por nginx.
+FROM node:20-alpine AS builder
+WORKDIR /app
+RUN corepack enable
+COPY package.json pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile
+COPY . .
+ARG VITE_API_BASE_URL=/api
+ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
+RUN pnpm build
+
+FROM nginx:1.27-alpine
+COPY --from=builder /app/dist /usr/share/nginx/html
+# nginx config viene desde el host vía volumen — ver docker-compose.prod.yml
+```
+
+Commit:
+```bash
+git add frontend/Dockerfile
+git commit -m "build(frontend): Dockerfile que produce el bundle estático para nginx"
+```
+
+---
+
+### Task 12.2: `nginx/medicia.conf` con TLS, HSTS y headers de seguridad
+
+**Files:**
+- Create: `nginx/medicia.conf.template`
+
+```nginx
+# nginx/medicia.conf.template — renderiza ${DOMAIN_NAME} en runtime.
+server {
+    listen 80;
+    server_name ${DOMAIN_NAME};
+    location /.well-known/acme-challenge/ { root /var/www/certbot; }
+    location / { return 301 https://$host$request_uri; }
+}
+
+server {
+    listen 443 ssl http2;
+    server_name ${DOMAIN_NAME};
+
+    ssl_certificate     /etc/letsencrypt/live/${DOMAIN_NAME}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${DOMAIN_NAME}/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+
+    # Security headers
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "DENY" always;
+    add_header Referrer-Policy "same-origin" always;
+    add_header Permissions-Policy "geolocation=(), microphone=(), camera=()" always;
+    add_header Content-Security-Policy "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'self'" always;
+
+    client_max_body_size 12m;
+
+    location /api/ {
+        proxy_pass http://backend:8000/api/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_read_timeout 60s;
+    }
+
+    location = /healthz   { proxy_pass http://backend:8000/healthz; }
+    location = /readyz    { proxy_pass http://backend:8000/readyz; }
+
+    location / {
+        root /usr/share/nginx/html;
+        try_files $uri /index.html;
+    }
+}
+```
+
+Commit:
+```bash
+git add nginx/medicia.conf.template
+git commit -m "feat(ops): nginx config con TLS, HSTS, CSP estricta y proxy a backend"
+```
+
+---
+
+### Task 12.3: `docker-compose.prod.yml`
+
+**Files:**
+- Create: `docker-compose.prod.yml`
+
+```yaml
+# docker-compose.prod.yml — stack productivo: postgres + minio + backend + nginx + certbot.
+name: medicia-prod
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      retries: 20
+
+  minio:
+    image: minio/minio:RELEASE.2025-01-20T14-49-07Z
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    command: server /data
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      retries: 20
+
+  minio-init:
+    image: minio/mc:RELEASE.2025-01-17T23-25-50Z
+    depends_on:
+      minio: { condition: service_healthy }
+    env_file: .env
+    entrypoint: >
+      sh -c "
+        mc alias set local http://minio:9000 $$MINIO_ROOT_USER $$MINIO_ROOT_PASSWORD &&
+        (mc mb local/$$MINIO_BUCKET || true) &&
+        mc anonymous set none local/$$MINIO_BUCKET
+      "
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      postgres: { condition: service_healthy }
+      minio: { condition: service_healthy }
+    command: >
+      sh -c "uv run alembic upgrade head &&
+             uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips='*'"
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: /api
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    depends_on: [backend, frontend]
+    ports: ["80:80", "443:443"]
+    env_file: .env
+    volumes:
+      - ./nginx/medicia.conf.template:/etc/nginx/templates/medicia.conf.template:ro
+      - ./frontend/dist:/usr/share/nginx/html:ro
+      - certbot_certs:/etc/letsencrypt:ro
+      - certbot_webroot:/var/www/certbot
+    environment:
+      DOMAIN_NAME: ${DOMAIN_NAME}
+
+  certbot:
+    image: certbot/certbot:latest
+    restart: unless-stopped
+    volumes:
+      - certbot_certs:/etc/letsencrypt
+      - certbot_webroot:/var/www/certbot
+    entrypoint: >
+      sh -c "trap exit TERM;
+             while :; do
+               certbot renew --webroot -w /var/www/certbot --quiet;
+               sleep 12h & wait $${!};
+             done"
+
+volumes:
+  pg_data:
+  minio_data:
+  certbot_certs:
+  certbot_webroot:
+```
+
+Add to `.env.example`:
+```bash
+DOMAIN_NAME=medicia.example.com
+```
+
+Commit:
+```bash
+git add docker-compose.prod.yml .env.example
+git commit -m "feat(ops): docker-compose.prod con nginx, certbot, healthchecks y volúmenes nombrados"
+```
+
+---
+
+### Task 12.4: Certificado TLS inicial + verificación
+
+**Files:** none (procedure documented)
+
+Procedure (one-time on the destination host, AFTER `bootstrap.sh` has run):
+
+```bash
+# 1) Obtener cert inicial con webroot
+docker compose -f docker-compose.prod.yml exec certbot \
+  certbot certonly --webroot -w /var/www/certbot \
+  -d "$DOMAIN_NAME" --agree-tos -m "$ADMIN_EMAIL" --non-interactive
+
+# 2) Reload nginx
+docker compose -f docker-compose.prod.yml exec nginx nginx -s reload
+
+# 3) Verificar TLS y headers
+curl -sIo /dev/null -w "%{http_code}\n" "https://$DOMAIN_NAME/readyz"
+curl -sI "https://$DOMAIN_NAME/" | grep -Ei "strict-transport-security|content-security-policy|x-content-type-options"
+```
+
+Append to `docs/MIGRATION.md`:
+
+```markdown
+## 6) TLS inicial
+
+Después de `bootstrap.sh`, completar el cert HTTPS:
+
+```bash
+docker compose -f docker-compose.prod.yml exec certbot \
+  certbot certonly --webroot -w /var/www/certbot \
+  -d "$DOMAIN_NAME" --agree-tos -m "$ADMIN_EMAIL" --non-interactive
+docker compose -f docker-compose.prod.yml exec nginx nginx -s reload
+```
+
+El servicio `certbot` corre en loop y renueva cada 12h.
+```
+
+Commit:
+```bash
+git add docs/MIGRATION.md
+git commit -m "docs(ops): procedimiento certbot inicial en MIGRATION.md"
+```
+
+---
+
+### Task 12.5: Smoke verification + sign-off
+
+- [ ] **Step 1: Local end-to-end run**
+
+```bash
+cp .env.example .env  # editar valores
+./scripts/bootstrap.sh
+curl -fsS http://localhost/healthz
+curl -fsS http://localhost/readyz
+```
+
+- [ ] **Step 2: CI pipeline green**
+
+Push to a feature branch and confirm the GitHub Actions run reports:
+- backend: ruff + mypy + pytest coverage ≥ 80% ✅
+- frontend: typecheck + vitest coverage ≥ 70% ✅
+- e2e: 4 escenarios + axe sin violaciones serias/críticas ✅
+
+- [ ] **Step 3: Final commit + tag v0.1.0**
+
+```bash
+git checkout main
+git pull --ff-only
+git tag -a v0.1.0 -m "MVP: medicina laboral — ausentismo y licencias médicas"
+git push origin main --tags
+```
+
+- [ ] **Step 4: Hand-off**
+
+The plan is complete. Producción operativa con:
+- 3 roles (admin, médico, rrhh), RBAC enforced
+- Carga de licencias con adjunto PDF/imagen y SHA-256
+- Estado-máquina con auditoría inmutable
+- Topes versionados por categoría × tipo de licencia
+- Reportes agregados con export CSV auditado
+- Despliegue Docker, TLS automático, scripts de migración listos para Claude Code
+
+---
+
+## Apéndice A — Checklist de verificación final
+
+- [ ] `docker compose -f docker-compose.prod.yml ps` muestra todos los servicios `healthy`
+- [ ] `/readyz` devuelve 200
+- [ ] Login admin con creds del `.env` funciona
+- [ ] Crear empleado desde UI funciona
+- [ ] Crear licencia con adjunto sube a MinIO (verificar con `mc ls`)
+- [ ] Médico valida licencia → `auditoria` tiene entrada con `state_change`
+- [ ] RRHH NO ve `diagnostico_id` ni `observaciones` en `GET /api/licencias`
+- [ ] Editar tope crea nueva fila en `topes_dias`, la previa queda con `vigente_hasta` seteado
+- [ ] Reporte CSV exportado dispara `accion='export'` en `auditoria`
+- [ ] `INSERT` en `auditoria` desde la app funciona; intento de `DELETE` falla
+- [ ] CI verde en pipeline completo
+- [ ] `./scripts/backup.sh` produce backup con `MANIFEST.sha256` válido
+- [ ] `./scripts/migrate.sh` mueve a un VPS de prueba y `/readyz` responde 200
+
+---
+
+## Apéndice B — Riesgos durante la implementación
+
+| Riesgo | Síntoma temprano | Mitigación |
+|---|---|---|
+| Conflicto FK entre adjuntos y licencias en migración | autogenerate falla en Phase 5 | Diferir adjuntos hasta Phase 6.1 (ya documentado) |
+| Tests flakey por testcontainers lento | timeouts en CI | Reusar contenedor sesión (`scope="session"`) ya está; aumentar timeout si pasa |
+| `uuid7` package no disponible en algunos mirrors | `uv sync` falla | Cambiar a `uuid_extensions` o implementar UUIDv7 a mano (~10 líneas) |
+| Certbot rate limit en pruebas | 429 de Let's Encrypt | Usar `--staging` durante setup, swap a prod al final |
+| MinIO presigned URL expira mientras se descarga archivo grande | descarga incompleta | TTL de 5 min ya cubre archivos ≤ 10 MB (límite v1) |
+| RBAC bypass por error de wiring | test_rbac falla | Matriz exhaustiva ya planeada en Task 2.5 |
