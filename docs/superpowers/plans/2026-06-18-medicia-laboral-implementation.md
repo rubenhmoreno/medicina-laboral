@@ -3682,3 +3682,298 @@ git commit -m "feat(empleados): empleados CRUD + búsqueda paginada"
 Add to `alembic/env.py` and `main.py`.
 
 ---
+
+## Phase 5 — Adjuntos (MinIO)
+
+### Task 5.1: Adjunto model + storage helper
+
+**Files:**
+- Create: `backend/app/modules/adjuntos/{__init__,models,schemas,repository,service,router}.py`
+- Modify: `backend/app/core/storage.py` (add upload/presign helpers)
+- Tests + migration
+
+- [ ] **Step 1: Model**
+
+```python
+# backend/app/modules/adjuntos/models.py
+from datetime import datetime
+from uuid import UUID
+
+from sqlalchemy import BigInteger, DateTime, ForeignKey, String, func
+from sqlalchemy.dialects.postgresql import UUID as PgUUID
+from sqlalchemy.orm import Mapped, mapped_column
+
+from app.core.db_base import Base
+from app.core.ids import new_uuid7
+
+
+class Adjunto(Base):
+    __tablename__ = "adjuntos"
+
+    id: Mapped[UUID] = mapped_column(PgUUID(as_uuid=True), primary_key=True, default=new_uuid7)
+    licencia_id: Mapped[UUID] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("licencias.id", ondelete="CASCADE")
+    )
+    nombre_original: Mapped[str] = mapped_column(String(255))
+    mime_type: Mapped[str] = mapped_column(String(120))
+    size_bytes: Mapped[int] = mapped_column(BigInteger)
+    sha256: Mapped[str] = mapped_column(String(64))
+    storage_key: Mapped[str] = mapped_column(String(255))
+    subido_por: Mapped[UUID | None] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("usuarios.id"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+```
+
+> **Note:** Migration depends on the `licencias` table that is created in Phase 6. **Do the autogenerate + apply for adjuntos after Task 6.1 is done** (after `licencias` exists).
+
+- [ ] **Step 2: Storage helpers — extend `app/core/storage.py`**
+
+```python
+# backend/app/core/storage.py  (append below existing helpers)
+import hashlib
+from datetime import timedelta
+from io import BytesIO
+
+from minio import Minio
+
+
+def sha256_of(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def put_object(
+    client: Minio,
+    bucket: str,
+    key: str,
+    data: bytes,
+    content_type: str,
+) -> None:
+    client.put_object(bucket, key, BytesIO(data), len(data), content_type=content_type)
+
+
+def presigned_get(client: Minio, bucket: str, key: str, ttl_minutes: int = 5) -> str:
+    return client.presigned_get_object(bucket, key, expires=timedelta(minutes=ttl_minutes))
+```
+
+- [ ] **Step 3: Schemas**
+
+```python
+# backend/app/modules/adjuntos/schemas.py
+from datetime import datetime
+from uuid import UUID
+from pydantic import BaseModel, ConfigDict
+
+
+class AdjuntoOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: UUID
+    licencia_id: UUID
+    nombre_original: str
+    mime_type: str
+    size_bytes: int
+    sha256: str
+    created_at: datetime
+
+
+class AdjuntoDownload(BaseModel):
+    url: str
+    expires_in_seconds: int
+```
+
+- [ ] **Step 4: Repository + service**
+
+```python
+# backend/app/modules/adjuntos/repository.py
+from uuid import UUID
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from app.modules.adjuntos.models import Adjunto
+
+
+async def insert(s: AsyncSession, a: Adjunto) -> Adjunto:
+    s.add(a); await s.flush(); return a
+
+
+async def get(s: AsyncSession, id_: UUID) -> Adjunto | None:
+    return (await s.execute(select(Adjunto).where(Adjunto.id == id_))).scalar_one_or_none()
+
+
+async def list_for_licencia(s: AsyncSession, licencia_id: UUID) -> list[Adjunto]:
+    stmt = select(Adjunto).where(Adjunto.licencia_id == licencia_id).order_by(Adjunto.created_at)
+    return list((await s.execute(stmt)).scalars())
+```
+
+```python
+# backend/app/modules/adjuntos/service.py
+from uuid import UUID
+
+from minio import Minio
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.settings import Settings
+from app.core.storage import presigned_get, put_object, sha256_of
+from app.modules.adjuntos import repository as repo
+from app.modules.adjuntos.models import Adjunto
+from app.shared.exceptions import ValidationError
+
+_ALLOWED_MIME = {"application/pdf", "image/png", "image/jpeg", "image/webp"}
+_MAX_SIZE_BYTES = 10 * 1024 * 1024  # 10 MB
+
+
+async def upload_adjunto(
+    s: AsyncSession,
+    *,
+    mc: Minio,
+    settings: Settings,
+    licencia_id: UUID,
+    nombre_original: str,
+    mime_type: str,
+    payload: bytes,
+    usuario_id: UUID | None,
+) -> Adjunto:
+    if mime_type not in _ALLOWED_MIME:
+        raise ValidationError("tipo de archivo no permitido", detail={"mime": mime_type})
+    if len(payload) > _MAX_SIZE_BYTES:
+        raise ValidationError("archivo demasiado grande", detail={"max": _MAX_SIZE_BYTES})
+
+    digest = sha256_of(payload)
+    key = f"licencias/{licencia_id}/{digest}-{nombre_original}"
+    put_object(mc, settings.minio_bucket, key, payload, mime_type)
+
+    return await repo.insert(
+        s,
+        Adjunto(
+            licencia_id=licencia_id,
+            nombre_original=nombre_original,
+            mime_type=mime_type,
+            size_bytes=len(payload),
+            sha256=digest,
+            storage_key=key,
+            subido_por=usuario_id,
+        ),
+    )
+
+
+async def download_url(
+    s: AsyncSession, mc: Minio, settings: Settings, adjunto_id: UUID
+) -> tuple[str, int]:
+    adj = await repo.get(s, adjunto_id)
+    if not adj:
+        from app.shared.exceptions import NotFoundError
+        raise NotFoundError("adjunto no encontrado")
+    ttl_min = 5
+    return presigned_get(mc, settings.minio_bucket, adj.storage_key, ttl_minutes=ttl_min), ttl_min * 60
+```
+
+- [ ] **Step 5: Router**
+
+```python
+# backend/app/modules/adjuntos/router.py
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, File, Form, UploadFile
+from minio import Minio
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.deps import current_user, get_db
+from app.core.permissions import require_role
+from app.core.settings import Settings, get_settings
+from app.core.storage import minio_client
+from app.modules.adjuntos.schemas import AdjuntoDownload, AdjuntoOut
+from app.modules.adjuntos.service import download_url, upload_adjunto
+from app.modules.usuarios.models import Rol, Usuario
+
+router = APIRouter(prefix="/api/adjuntos", tags=["adjuntos"])
+
+
+def _mc(settings: Settings = Depends(get_settings)) -> Minio:
+    return minio_client(settings)
+
+
+@router.post("", response_model=AdjuntoOut, status_code=201,
+             dependencies=[Depends(require_role(Rol.ADMIN, Rol.RRHH, Rol.MEDICO))])
+async def upload(
+    licencia_id: UUID = Form(...),
+    file: UploadFile = File(...),
+    s: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+    mc: Minio = Depends(_mc),
+    user: Usuario = Depends(current_user),
+):
+    payload = await file.read()
+    return await upload_adjunto(
+        s, mc=mc, settings=settings, licencia_id=licencia_id,
+        nombre_original=file.filename or "archivo",
+        mime_type=file.content_type or "application/octet-stream",
+        payload=payload, usuario_id=user.id,
+    )
+
+
+@router.get("/{id_}/download", response_model=AdjuntoDownload)
+async def get_download(
+    id_: UUID,
+    s: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+    mc: Minio = Depends(_mc),
+    user: Usuario = Depends(current_user),
+):
+    url, ttl = await download_url(s, mc, settings, id_)
+    return AdjuntoDownload(url=url, expires_in_seconds=ttl)
+```
+
+- [ ] **Step 6: Tests (hermetic MinIO via testcontainers)**
+
+```python
+# backend/tests/modules/adjuntos/test_service.py
+import pytest
+from minio import Minio
+from testcontainers.minio import MinioContainer
+
+from app.core.settings import get_settings
+from app.modules.adjuntos.service import upload_adjunto, download_url
+from app.shared.exceptions import ValidationError
+
+
+@pytest.fixture(scope="module")
+def minio_container():
+    with MinioContainer() as mc:
+        yield mc
+
+
+@pytest.fixture
+def minio_client_with_bucket(minio_container):
+    cfg = minio_container.get_config()
+    client = Minio(cfg["endpoint"], access_key=cfg["access_key"], secret_key=cfg["secret_key"], secure=False)
+    bucket = "test-bucket"
+    if not client.bucket_exists(bucket):
+        client.make_bucket(bucket)
+    return client, bucket
+
+
+@pytest.mark.asyncio
+async def test_rejects_invalid_mime(db_session, minio_client_with_bucket):
+    mc, bucket = minio_client_with_bucket
+    settings = get_settings()
+    settings.__dict__["minio_bucket"] = bucket  # override for this test
+    import uuid
+    with pytest.raises(ValidationError):
+        await upload_adjunto(
+            db_session, mc=mc, settings=settings, licencia_id=uuid.uuid4(),
+            nombre_original="x.exe", mime_type="application/x-msdownload",
+            payload=b"x", usuario_id=None,
+        )
+```
+
+> The full upload/download round-trip test needs a `licencia` row to satisfy the FK — defer that test until Phase 6 lands.
+
+- [ ] **Step 7: Commit (migration deferred to Phase 6)**
+
+```bash
+git add backend/app/core/storage.py backend/app/modules/adjuntos backend/tests/modules/adjuntos backend/app/main.py
+git commit -m "feat(adjuntos): upload con sha256 + presigned download (migración pendiente phase 6)"
+```
+
+Register router; **do NOT** add adjuntos to `alembic/env.py` yet — wait until Phase 6 Task 6.1 lands the `licencias` table so the FK resolves.
+
+---
