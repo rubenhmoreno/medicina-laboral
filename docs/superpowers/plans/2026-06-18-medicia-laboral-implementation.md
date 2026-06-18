@@ -3421,3 +3421,264 @@ git commit -m "feat(topes): topes_dias versionados + admin endpoint"
 Register router and add model import to alembic/env.py.
 
 ---
+
+## Phase 4 — Empleados
+
+### Task 4.1: Empleado model + migration
+
+**Files:** `backend/app/modules/empleados/*` + tests + migration
+
+- [ ] **Step 1: Model**
+
+```python
+# backend/app/modules/empleados/models.py
+from datetime import date, datetime
+from uuid import UUID
+
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, String, func
+from sqlalchemy.dialects.postgresql import UUID as PgUUID
+from sqlalchemy.orm import Mapped, mapped_column
+
+from app.core.db_base import Base
+from app.core.ids import new_uuid7
+
+
+class Empleado(Base):
+    __tablename__ = "empleados"
+
+    id: Mapped[UUID] = mapped_column(PgUUID(as_uuid=True), primary_key=True, default=new_uuid7)
+    legajo: Mapped[str] = mapped_column(String(40), unique=True, index=True)
+    cuil: Mapped[str] = mapped_column(String(13), unique=True, index=True)
+    nombre: Mapped[str] = mapped_column(String(120))
+    apellido: Mapped[str] = mapped_column(String(120))
+    fecha_nacimiento: Mapped[date | None] = mapped_column(Date, nullable=True)
+    fecha_ingreso: Mapped[date] = mapped_column(Date)
+    area_id: Mapped[UUID | None] = mapped_column(PgUUID(as_uuid=True), ForeignKey("areas.id"), nullable=True)
+    categoria_id: Mapped[UUID] = mapped_column(PgUUID(as_uuid=True), ForeignKey("categorias_laborales.id"))
+    supervisor_id: Mapped[UUID | None] = mapped_column(PgUUID(as_uuid=True), ForeignKey("empleados.id"), nullable=True)
+    email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    telefono: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    activo: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+```
+
+- [ ] **Step 2: Schemas**
+
+```python
+# backend/app/modules/empleados/schemas.py
+from datetime import date
+from uuid import UUID
+
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
+
+
+_CUIL_RE = r"^\d{2}-\d{8}-\d{1}$|^\d{11}$"
+
+
+class EmpleadoCreate(BaseModel):
+    legajo: str = Field(min_length=1, max_length=40)
+    cuil: str = Field(pattern=_CUIL_RE)
+    nombre: str
+    apellido: str
+    fecha_nacimiento: date | None = None
+    fecha_ingreso: date
+    area_id: UUID | None = None
+    categoria_id: UUID
+    supervisor_id: UUID | None = None
+    email: EmailStr | None = None
+    telefono: str | None = None
+
+    @field_validator("cuil")
+    @classmethod
+    def normalize_cuil(cls, v: str) -> str:
+        return v.replace("-", "")
+
+
+class EmpleadoUpdate(BaseModel):
+    nombre: str | None = None
+    apellido: str | None = None
+    area_id: UUID | None = None
+    categoria_id: UUID | None = None
+    supervisor_id: UUID | None = None
+    email: EmailStr | None = None
+    telefono: str | None = None
+    activo: bool | None = None
+
+
+class EmpleadoOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: UUID
+    legajo: str
+    cuil: str
+    nombre: str
+    apellido: str
+    fecha_nacimiento: date | None
+    fecha_ingreso: date
+    area_id: UUID | None
+    categoria_id: UUID
+    supervisor_id: UUID | None
+    email: str | None
+    telefono: str | None
+    activo: bool
+```
+
+- [ ] **Step 3: Repository**
+
+```python
+# backend/app/modules/empleados/repository.py
+from uuid import UUID
+
+from sqlalchemy import or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.modules.empleados.models import Empleado
+
+
+async def list_(s: AsyncSession, q: str | None = None, limit: int = 50, offset: int = 0) -> list[Empleado]:
+    stmt = select(Empleado).order_by(Empleado.apellido, Empleado.nombre).limit(limit).offset(offset)
+    if q:
+        like = f"%{q}%"
+        stmt = stmt.where(or_(
+            Empleado.legajo.ilike(like),
+            Empleado.cuil.ilike(like),
+            Empleado.apellido.ilike(like),
+            Empleado.nombre.ilike(like),
+        ))
+    return list((await s.execute(stmt)).scalars())
+
+
+async def get(s: AsyncSession, id_: UUID) -> Empleado | None:
+    return (await s.execute(select(Empleado).where(Empleado.id == id_))).scalar_one_or_none()
+
+
+async def by_legajo(s: AsyncSession, legajo: str) -> Empleado | None:
+    return (await s.execute(select(Empleado).where(Empleado.legajo == legajo))).scalar_one_or_none()
+
+
+async def by_cuil(s: AsyncSession, cuil: str) -> Empleado | None:
+    return (await s.execute(select(Empleado).where(Empleado.cuil == cuil))).scalar_one_or_none()
+
+
+async def insert(s: AsyncSession, e: Empleado) -> Empleado:
+    s.add(e); await s.flush(); return e
+```
+
+- [ ] **Step 4: Service**
+
+```python
+# backend/app/modules/empleados/service.py
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.modules.categorias import repository as cats_repo
+from app.modules.empleados import repository as repo
+from app.modules.empleados.models import Empleado
+from app.modules.empleados.schemas import EmpleadoCreate
+from app.shared.exceptions import ConflictError, NotFoundError
+
+
+async def create_empleado(s: AsyncSession, payload: EmpleadoCreate) -> Empleado:
+    if await repo.by_legajo(s, payload.legajo):
+        raise ConflictError("legajo en uso", detail={"field": "legajo"})
+    if await repo.by_cuil(s, payload.cuil):
+        raise ConflictError("cuil en uso", detail={"field": "cuil"})
+    if not await cats_repo.get(s, payload.categoria_id):
+        raise NotFoundError("categoria no encontrada", detail={"categoria_id": str(payload.categoria_id)})
+    return await repo.insert(s, Empleado(**payload.model_dump()))
+```
+
+- [ ] **Step 5: Router**
+
+```python
+# backend/app/modules/empleados/router.py
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, Query
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.deps import get_db
+from app.core.permissions import require_role
+from app.modules.empleados import repository as repo
+from app.modules.empleados.schemas import EmpleadoCreate, EmpleadoOut
+from app.modules.empleados.service import create_empleado
+from app.modules.usuarios.models import Rol
+from app.shared.exceptions import NotFoundError
+
+router = APIRouter(prefix="/api/empleados", tags=["empleados"])
+
+
+@router.get("", response_model=list[EmpleadoOut])
+async def list_empleados(
+    q: str | None = Query(default=None),
+    limit: int = Query(default=50, le=200),
+    offset: int = Query(default=0, ge=0),
+    s: AsyncSession = Depends(get_db),
+):
+    return await repo.list_(s, q=q, limit=limit, offset=offset)
+
+
+@router.get("/{id_}", response_model=EmpleadoOut)
+async def get_one(id_: UUID, s: AsyncSession = Depends(get_db)):
+    e = await repo.get(s, id_)
+    if not e:
+        raise NotFoundError("empleado no encontrado")
+    return e
+
+
+@router.post(
+    "", response_model=EmpleadoOut, status_code=201,
+    dependencies=[Depends(require_role(Rol.ADMIN, Rol.RRHH))],
+)
+async def create(payload: EmpleadoCreate, s: AsyncSession = Depends(get_db)):
+    return await create_empleado(s, payload)
+```
+
+- [ ] **Step 6: Tests**
+
+```python
+# backend/tests/modules/empleados/test_service.py
+from datetime import date
+
+import pytest
+
+from app.modules.categorias.schemas import CategoriaCreate
+from app.modules.categorias.service import create_categoria
+from app.modules.empleados.schemas import EmpleadoCreate
+from app.modules.empleados.service import create_empleado
+from app.shared.exceptions import ConflictError, NotFoundError
+
+
+@pytest.mark.asyncio
+async def test_create_requires_existing_categoria(db_session):
+    import uuid
+    with pytest.raises(NotFoundError):
+        await create_empleado(db_session, EmpleadoCreate(
+            legajo="L1", cuil="20111111119", nombre="A", apellido="B",
+            fecha_ingreso=date(2020, 1, 1), categoria_id=uuid.uuid4(),
+        ))
+
+
+@pytest.mark.asyncio
+async def test_duplicate_legajo(db_session):
+    cat = await create_categoria(db_session, CategoriaCreate(codigo="planta", nombre="P"))
+    await db_session.flush()
+    base = EmpleadoCreate(legajo="L1", cuil="20111111119", nombre="A", apellido="B",
+                          fecha_ingreso=date(2020, 1, 1), categoria_id=cat.id)
+    await create_empleado(db_session, base)
+    with pytest.raises(ConflictError):
+        await create_empleado(db_session, base.model_copy(update={"cuil": "20222222222"}))
+```
+
+- [ ] **Step 7: Migration + register + commit**
+
+```bash
+cd backend && uv run alembic revision --autogenerate -m "empleados"
+uv run alembic upgrade head
+uv run pytest tests/modules/empleados -v
+git add backend/app/modules/empleados backend/tests/modules/empleados backend/alembic/versions backend/alembic/env.py backend/app/main.py
+git commit -m "feat(empleados): empleados CRUD + búsqueda paginada"
+```
+
+Add to `alembic/env.py` and `main.py`.
+
+---
