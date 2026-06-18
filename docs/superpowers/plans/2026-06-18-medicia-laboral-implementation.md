@@ -5765,3 +5765,770 @@ git commit -m "feat(frontend): layout shell con menú por rol + dashboard skelet
 ```
 
 ---
+
+## Phase 9 — Frontend features
+
+### Task 9.1: Resource APIs (empleados, licencias, catálogos, reportes, topes)
+
+**Files:**
+- Create: `frontend/src/api/{empleados,licencias,catalogos,reportes,topes,adjuntos}.ts`
+
+- [ ] **Step 1: Type-safe API surface**
+
+```ts
+// frontend/src/api/empleados.ts
+import { http } from "./http";
+
+export type Empleado = {
+  id: string; legajo: string; cuil: string;
+  nombre: string; apellido: string;
+  fecha_nacimiento: string | null; fecha_ingreso: string;
+  area_id: string | null; categoria_id: string; supervisor_id: string | null;
+  email: string | null; telefono: string | null; activo: boolean;
+};
+
+export type EmpleadoCreate = Omit<Empleado, "id" | "activo">;
+
+export const empleadosApi = {
+  list: (q?: string, limit = 50, offset = 0) =>
+    http.get<Empleado[]>("/api/empleados", { params: { q, limit, offset } }).then((r) => r.data),
+  get: (id: string) => http.get<Empleado>(`/api/empleados/${id}`).then((r) => r.data),
+  create: (p: EmpleadoCreate) => http.post<Empleado>("/api/empleados", p).then((r) => r.data),
+};
+```
+
+```ts
+// frontend/src/api/licencias.ts
+import { http } from "./http";
+
+export type EstadoLicencia = "borrador" | "enviado" | "validado" | "rechazado" | "anulado";
+export type OrigenLicencia = "rrhh" | "medico";
+
+export type Licencia = {
+  id: string; empleado_id: string; tipo_licencia_id: string;
+  diagnostico_id: string | null;
+  fecha_desde: string; fecha_hasta: string;
+  dias_solicitados: number; dias_otorgados: number | null;
+  estado: EstadoLicencia; origen: OrigenLicencia;
+  observaciones: string | null; motivo_rechazo: string | null; motivo_anulacion: string | null;
+  certificante: string | null; matricula_certificante: string | null;
+  creado_por: string; validado_por: string | null; validado_en: string | null;
+};
+
+export type LicenciaCreate = {
+  empleado_id: string; tipo_licencia_id: string; diagnostico_id?: string | null;
+  fecha_desde: string; fecha_hasta: string;
+  observaciones?: string | null; certificante?: string | null; matricula_certificante?: string | null;
+};
+
+export const licenciasApi = {
+  list: (params: { estado?: EstadoLicencia; empleado_id?: string; area_id?: string; desde?: string; hasta?: string; limit?: number; offset?: number }) =>
+    http.get<Licencia[]>("/api/licencias", { params }).then((r) => r.data),
+  get: (id: string) => http.get<Licencia>(`/api/licencias/${id}`).then((r) => r.data),
+  create: (p: LicenciaCreate) => http.post<Licencia>("/api/licencias", p).then((r) => r.data),
+  enviar: (id: string) => http.post<Licencia>(`/api/licencias/${id}/enviar`).then((r) => r.data),
+  validar: (id: string, dias_otorgados: number, observaciones?: string) =>
+    http.post<Licencia>(`/api/licencias/${id}/validar`, { dias_otorgados, observaciones }).then((r) => r.data),
+  rechazar: (id: string, motivo_rechazo: string) =>
+    http.post<Licencia>(`/api/licencias/${id}/rechazar`, { motivo_rechazo }).then((r) => r.data),
+  anular: (id: string, motivo_anulacion: string) =>
+    http.post<Licencia>(`/api/licencias/${id}/anular`, { motivo_anulacion }).then((r) => r.data),
+  evaluarTope: (id: string) => http.get(`/api/licencias/${id}/tope`).then((r) => r.data),
+};
+```
+
+```ts
+// frontend/src/api/catalogos.ts
+import { http } from "./http";
+
+export type Area = { id: string; nombre: string; parent_id: string | null };
+export type Categoria = { id: string; codigo: string; nombre: string; activa: boolean };
+export type TipoLicencia = { id: string; codigo: string; nombre: string; base_legal: string | null; paga: boolean; computa_dias: boolean };
+export type Diagnostico = { id: string; codigo_cie10: string | null; descripcion: string; categoria: string | null; requiere_junta: boolean };
+
+export const catalogosApi = {
+  areas: () => http.get<Area[]>("/api/areas").then((r) => r.data),
+  categorias: () => http.get<Categoria[]>("/api/categorias").then((r) => r.data),
+  tiposLicencia: () => http.get<TipoLicencia[]>("/api/tipos-licencia").then((r) => r.data),
+  diagnosticos: () => http.get<Diagnostico[]>("/api/diagnosticos").then((r) => r.data),
+};
+```
+
+```ts
+// frontend/src/api/topes.ts
+import { http } from "./http";
+
+export type Tope = {
+  id: string; categoria_id: string; tipo_licencia_id: string;
+  dias_maximos: number; ventana: "anio-calendario" | "anio-aniversario" | "sin-limite";
+  vigente_desde: string; vigente_hasta: string | null; observacion: string | null;
+};
+
+export const topesApi = {
+  list: () => http.get<Tope[]>("/api/admin/topes").then((r) => r.data),
+  set: (categoria_id: string, tipo_licencia_id: string, body: { dias_maximos: number; ventana: string; desde: string; observacion?: string }) =>
+    http.put<Tope>(`/api/admin/topes/${categoria_id}/${tipo_licencia_id}`, body).then((r) => r.data),
+};
+```
+
+```ts
+// frontend/src/api/reportes.ts
+import { http } from "./http";
+
+export const reportesApi = {
+  porArea: (desde: string, hasta: string) =>
+    http.get("/api/reportes/por-area", { params: { desde, hasta } }).then((r) => r.data),
+  porCategoriaDiag: (desde: string, hasta: string) =>
+    http.get("/api/reportes/por-categoria-diag", { params: { desde, hasta } }).then((r) => r.data),
+  mensual: (desde: string, hasta: string) =>
+    http.get("/api/reportes/mensual", { params: { desde, hasta } }).then((r) => r.data),
+  downloadCsv: (path: string, desde: string, hasta: string) => {
+    const base = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
+    window.location.href = `${base}/api/reportes/${path}?desde=${desde}&hasta=${hasta}&formato=csv`;
+  },
+};
+```
+
+```ts
+// frontend/src/api/adjuntos.ts
+import { http } from "./http";
+
+export type Adjunto = {
+  id: string; licencia_id: string; nombre_original: string; mime_type: string;
+  size_bytes: number; sha256: string; created_at: string;
+};
+
+export const adjuntosApi = {
+  upload: (licencia_id: string, file: File) => {
+    const fd = new FormData();
+    fd.append("licencia_id", licencia_id);
+    fd.append("file", file);
+    return http.post<Adjunto>("/api/adjuntos", fd, { headers: { "Content-Type": "multipart/form-data" } }).then((r) => r.data);
+  },
+  downloadUrl: (id: string) => http.get<{ url: string; expires_in_seconds: number }>(`/api/adjuntos/${id}/download`).then((r) => r.data),
+};
+```
+
+- [ ] **Step 2: Commit**
+
+```bash
+git add frontend/src/api
+git commit -m "feat(frontend): api clients (empleados, licencias, catálogos, topes, reportes, adjuntos)"
+```
+
+---
+
+### Task 9.2: Empleados — listado + alta
+
+**Files:**
+- Create: `frontend/src/features/empleados/{EmpleadosListPage,EmpleadoCreateForm}.tsx`
+- Add routes in `App.tsx`
+
+- [ ] **Step 1: Listado con search debounced**
+
+```tsx
+// frontend/src/features/empleados/EmpleadosListPage.tsx
+import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
+import { empleadosApi, type Empleado } from "@/api/empleados";
+
+export function EmpleadosListPage() {
+  const [q, setQ] = useState("");
+  const [rows, setRows] = useState<Empleado[]>([]);
+  useEffect(() => {
+    const t = setTimeout(() => empleadosApi.list(q).then(setRows), 250);
+    return () => clearTimeout(t);
+  }, [q]);
+  return (
+    <section className="space-y-3">
+      <header className="flex items-center justify-between">
+        <h1 className="text-2xl font-semibold">Empleados</h1>
+        <Link to="/empleados/nuevo" className="bg-slate-900 text-white px-3 py-2 rounded">Nuevo</Link>
+      </header>
+      <input className="border rounded p-2 w-full max-w-md"
+             placeholder="Buscar por legajo, CUIL o nombre…"
+             value={q} onChange={(e) => setQ(e.target.value)} />
+      <table className="w-full text-sm bg-white rounded shadow">
+        <thead className="text-left bg-slate-100">
+          <tr>
+            <th className="p-2">Legajo</th><th className="p-2">Apellido y nombre</th>
+            <th className="p-2">CUIL</th><th className="p-2">Categoría</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((e) => (
+            <tr key={e.id} className="border-t">
+              <td className="p-2">{e.legajo}</td>
+              <td className="p-2">{e.apellido}, {e.nombre}</td>
+              <td className="p-2">{e.cuil}</td>
+              <td className="p-2">{e.categoria_id}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </section>
+  );
+}
+```
+
+- [ ] **Step 2: Alta**
+
+```tsx
+// frontend/src/features/empleados/EmpleadoCreateForm.tsx
+import { useEffect, useState, type FormEvent } from "react";
+import { useNavigate } from "react-router-dom";
+import { empleadosApi } from "@/api/empleados";
+import { catalogosApi, type Area, type Categoria } from "@/api/catalogos";
+
+export function EmpleadoCreateForm() {
+  const nav = useNavigate();
+  const [areas, setAreas] = useState<Area[]>([]);
+  const [cats, setCats] = useState<Categoria[]>([]);
+  const [form, setForm] = useState({
+    legajo: "", cuil: "", nombre: "", apellido: "",
+    fecha_nacimiento: "", fecha_ingreso: "",
+    area_id: "", categoria_id: "", supervisor_id: "",
+    email: "", telefono: "",
+  });
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    catalogosApi.areas().then(setAreas);
+    catalogosApi.categorias().then(setCats);
+  }, []);
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    setError(null);
+    try {
+      await empleadosApi.create({
+        legajo: form.legajo, cuil: form.cuil,
+        nombre: form.nombre, apellido: form.apellido,
+        fecha_nacimiento: form.fecha_nacimiento || null,
+        fecha_ingreso: form.fecha_ingreso,
+        area_id: form.area_id || null,
+        categoria_id: form.categoria_id,
+        supervisor_id: form.supervisor_id || null,
+        email: form.email || null, telefono: form.telefono || null,
+      });
+      nav("/empleados");
+    } catch (err: any) {
+      setError(err?.response?.data?.error?.message ?? "Error");
+    }
+  }
+
+  function setF<K extends keyof typeof form>(k: K, v: string) {
+    setForm((p) => ({ ...p, [k]: v }));
+  }
+
+  return (
+    <form onSubmit={submit} className="grid grid-cols-2 gap-3 max-w-2xl bg-white rounded shadow p-6">
+      <h1 className="col-span-2 text-2xl font-semibold">Nuevo empleado</h1>
+      {(["legajo","cuil","apellido","nombre","email","telefono"] as const).map((k) => (
+        <label key={k} className="text-sm">
+          {k}
+          <input className="mt-1 w-full border rounded p-2"
+                 value={form[k]} onChange={(e) => setF(k, e.target.value)} required={["legajo","cuil","apellido","nombre"].includes(k)} />
+        </label>
+      ))}
+      <label className="text-sm">Fecha de ingreso
+        <input type="date" className="mt-1 w-full border rounded p-2"
+               value={form.fecha_ingreso} onChange={(e) => setF("fecha_ingreso", e.target.value)} required />
+      </label>
+      <label className="text-sm">Fecha de nacimiento
+        <input type="date" className="mt-1 w-full border rounded p-2"
+               value={form.fecha_nacimiento} onChange={(e) => setF("fecha_nacimiento", e.target.value)} />
+      </label>
+      <label className="text-sm">Área
+        <select className="mt-1 w-full border rounded p-2"
+                value={form.area_id} onChange={(e) => setF("area_id", e.target.value)}>
+          <option value="">—</option>
+          {areas.map((a) => <option key={a.id} value={a.id}>{a.nombre}</option>)}
+        </select>
+      </label>
+      <label className="text-sm">Categoría
+        <select className="mt-1 w-full border rounded p-2"
+                value={form.categoria_id} onChange={(e) => setF("categoria_id", e.target.value)} required>
+          <option value="">—</option>
+          {cats.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+        </select>
+      </label>
+      {error && <p className="col-span-2 text-red-600 text-sm">{error}</p>}
+      <div className="col-span-2 flex justify-end gap-2">
+        <button type="button" onClick={() => nav(-1)} className="px-4 py-2">Cancelar</button>
+        <button className="bg-slate-900 text-white px-4 py-2 rounded">Guardar</button>
+      </div>
+    </form>
+  );
+}
+```
+
+- [ ] **Step 3: Wire routes**
+
+In `App.tsx`, inside the protected layout block:
+```tsx
+<Route path="/empleados" element={<EmpleadosListPage />} />
+<Route path="/empleados/nuevo" element={<EmpleadoCreateForm />} />
+```
+
+- [ ] **Step 4: Smoke test + commit**
+
+```bash
+pnpm typecheck
+git add frontend/src/features/empleados frontend/src/App.tsx
+git commit -m "feat(frontend): empleados listado con buscador + alta"
+```
+
+---
+
+### Task 9.3: Licencias — listado, alta, acciones de transición
+
+**Files:**
+- Create: `frontend/src/features/licencias/{LicenciasListPage,LicenciaForm,LicenciaDetailPage,ValidarDialog,RechazarDialog}.tsx`
+- Routes in `App.tsx`
+
+- [ ] **Step 1: Listado con filtros**
+
+```tsx
+// frontend/src/features/licencias/LicenciasListPage.tsx
+import { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
+import { licenciasApi, type EstadoLicencia, type Licencia } from "@/api/licencias";
+
+const ESTADOS: EstadoLicencia[] = ["borrador","enviado","validado","rechazado","anulado"];
+
+export function LicenciasListPage() {
+  const [estado, setEstado] = useState<EstadoLicencia | "">("");
+  const [desde, setDesde] = useState("");
+  const [hasta, setHasta] = useState("");
+  const [rows, setRows] = useState<Licencia[]>([]);
+
+  useEffect(() => {
+    licenciasApi.list({
+      estado: estado || undefined,
+      desde: desde || undefined,
+      hasta: hasta || undefined,
+    }).then(setRows);
+  }, [estado, desde, hasta]);
+
+  return (
+    <section className="space-y-3">
+      <header className="flex items-center justify-between">
+        <h1 className="text-2xl font-semibold">Licencias</h1>
+        <Link to="/licencias/nueva" className="bg-slate-900 text-white px-3 py-2 rounded">Nueva</Link>
+      </header>
+      <div className="flex flex-wrap gap-2">
+        <select className="border rounded p-2" value={estado} onChange={(e) => setEstado(e.target.value as any)}>
+          <option value="">(estado)</option>
+          {ESTADOS.map((s) => <option key={s} value={s}>{s}</option>)}
+        </select>
+        <input type="date" className="border rounded p-2" value={desde} onChange={(e) => setDesde(e.target.value)} />
+        <input type="date" className="border rounded p-2" value={hasta} onChange={(e) => setHasta(e.target.value)} />
+      </div>
+      <table className="w-full text-sm bg-white rounded shadow">
+        <thead className="text-left bg-slate-100">
+          <tr><th className="p-2">Desde</th><th className="p-2">Hasta</th><th className="p-2">Días</th><th className="p-2">Estado</th><th className="p-2"></th></tr>
+        </thead>
+        <tbody>
+          {rows.map((l) => (
+            <tr key={l.id} className="border-t">
+              <td className="p-2">{l.fecha_desde}</td>
+              <td className="p-2">{l.fecha_hasta}</td>
+              <td className="p-2">{l.dias_otorgados ?? l.dias_solicitados}</td>
+              <td className="p-2"><span className="px-2 py-1 rounded bg-slate-200">{l.estado}</span></td>
+              <td className="p-2"><Link to={`/licencias/${l.id}`} className="underline">Detalle</Link></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </section>
+  );
+}
+```
+
+- [ ] **Step 2: Alta (formulario + adjuntos)**
+
+```tsx
+// frontend/src/features/licencias/LicenciaForm.tsx
+import { useEffect, useState, type FormEvent } from "react";
+import { useNavigate } from "react-router-dom";
+import { catalogosApi, type Diagnostico, type TipoLicencia } from "@/api/catalogos";
+import { empleadosApi, type Empleado } from "@/api/empleados";
+import { licenciasApi } from "@/api/licencias";
+import { adjuntosApi } from "@/api/adjuntos";
+
+export function LicenciaForm() {
+  const nav = useNavigate();
+  const [empleados, setEmpleados] = useState<Empleado[]>([]);
+  const [tipos, setTipos] = useState<TipoLicencia[]>([]);
+  const [diags, setDiags] = useState<Diagnostico[]>([]);
+  const [file, setFile] = useState<File | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [form, setForm] = useState({
+    empleado_id: "", tipo_licencia_id: "", diagnostico_id: "",
+    fecha_desde: "", fecha_hasta: "",
+    observaciones: "", certificante: "", matricula_certificante: "",
+  });
+
+  useEffect(() => {
+    empleadosApi.list().then(setEmpleados);
+    catalogosApi.tiposLicencia().then(setTipos);
+    catalogosApi.diagnosticos().then(setDiags);
+  }, []);
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    setError(null);
+    try {
+      const lic = await licenciasApi.create({
+        empleado_id: form.empleado_id, tipo_licencia_id: form.tipo_licencia_id,
+        diagnostico_id: form.diagnostico_id || null,
+        fecha_desde: form.fecha_desde, fecha_hasta: form.fecha_hasta,
+        observaciones: form.observaciones || null,
+        certificante: form.certificante || null,
+        matricula_certificante: form.matricula_certificante || null,
+      });
+      if (file) await adjuntosApi.upload(lic.id, file);
+      nav(`/licencias/${lic.id}`);
+    } catch (err: any) {
+      setError(err?.response?.data?.error?.message ?? "Error");
+    }
+  }
+
+  function setF<K extends keyof typeof form>(k: K, v: string) { setForm((p) => ({ ...p, [k]: v })); }
+
+  return (
+    <form onSubmit={submit} className="grid grid-cols-2 gap-3 max-w-2xl bg-white rounded shadow p-6">
+      <h1 className="col-span-2 text-2xl font-semibold">Nueva licencia</h1>
+      <label className="text-sm col-span-2">Empleado
+        <select className="mt-1 w-full border rounded p-2" value={form.empleado_id}
+                onChange={(e) => setF("empleado_id", e.target.value)} required>
+          <option value="">—</option>
+          {empleados.map((e) => <option key={e.id} value={e.id}>{e.apellido}, {e.nombre} ({e.legajo})</option>)}
+        </select>
+      </label>
+      <label className="text-sm">Tipo
+        <select className="mt-1 w-full border rounded p-2" value={form.tipo_licencia_id}
+                onChange={(e) => setF("tipo_licencia_id", e.target.value)} required>
+          <option value="">—</option>
+          {tipos.map((t) => <option key={t.id} value={t.id}>{t.nombre}</option>)}
+        </select>
+      </label>
+      <label className="text-sm">Diagnóstico
+        <select className="mt-1 w-full border rounded p-2" value={form.diagnostico_id}
+                onChange={(e) => setF("diagnostico_id", e.target.value)}>
+          <option value="">—</option>
+          {diags.map((d) => <option key={d.id} value={d.id}>{d.descripcion}</option>)}
+        </select>
+      </label>
+      <label className="text-sm">Desde
+        <input type="date" className="mt-1 w-full border rounded p-2"
+               value={form.fecha_desde} onChange={(e) => setF("fecha_desde", e.target.value)} required />
+      </label>
+      <label className="text-sm">Hasta
+        <input type="date" className="mt-1 w-full border rounded p-2"
+               value={form.fecha_hasta} onChange={(e) => setF("fecha_hasta", e.target.value)} required />
+      </label>
+      <label className="text-sm">Certificante
+        <input className="mt-1 w-full border rounded p-2"
+               value={form.certificante} onChange={(e) => setF("certificante", e.target.value)} />
+      </label>
+      <label className="text-sm">Matrícula certificante
+        <input className="mt-1 w-full border rounded p-2"
+               value={form.matricula_certificante} onChange={(e) => setF("matricula_certificante", e.target.value)} />
+      </label>
+      <label className="col-span-2 text-sm">Observaciones
+        <textarea className="mt-1 w-full border rounded p-2" rows={3}
+                  value={form.observaciones} onChange={(e) => setF("observaciones", e.target.value)} />
+      </label>
+      <label className="col-span-2 text-sm">Adjunto (PDF/imagen)
+        <input type="file" accept="application/pdf,image/*"
+               onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+      </label>
+      {error && <p className="col-span-2 text-red-600 text-sm">{error}</p>}
+      <div className="col-span-2 flex justify-end gap-2">
+        <button type="button" onClick={() => nav(-1)} className="px-4 py-2">Cancelar</button>
+        <button className="bg-slate-900 text-white px-4 py-2 rounded">Guardar</button>
+      </div>
+    </form>
+  );
+}
+```
+
+- [ ] **Step 3: Detalle con acciones**
+
+```tsx
+// frontend/src/features/licencias/LicenciaDetailPage.tsx
+import { useEffect, useState } from "react";
+import { useParams } from "react-router-dom";
+import { licenciasApi, type Licencia } from "@/api/licencias";
+import { useAuth } from "@/auth/AuthContext";
+
+export function LicenciaDetailPage() {
+  const { id = "" } = useParams();
+  const { user } = useAuth();
+  const [lic, setLic] = useState<Licencia | null>(null);
+  const [tope, setTope] = useState<any | null>(null);
+
+  async function reload() {
+    setLic(await licenciasApi.get(id));
+    try { setTope(await licenciasApi.evaluarTope(id)); } catch { setTope(null); }
+  }
+  useEffect(() => { reload(); }, [id]);
+
+  if (!lic) return <p>Cargando…</p>;
+  return (
+    <section className="space-y-3 max-w-2xl">
+      <h1 className="text-2xl font-semibold">Licencia</h1>
+      <div className="bg-white rounded shadow p-4 space-y-2">
+        <p><b>Estado:</b> {lic.estado}</p>
+        <p><b>Desde:</b> {lic.fecha_desde} — <b>Hasta:</b> {lic.fecha_hasta}</p>
+        <p><b>Días solicitados:</b> {lic.dias_solicitados} — <b>Otorgados:</b> {lic.dias_otorgados ?? "—"}</p>
+        {tope && tope.tope_aplicable !== null && (
+          <p className={tope.excede ? "text-red-600 font-medium" : "text-slate-600"}>
+            Tope: {tope.dias_consumidos_ventana}/{tope.tope_aplicable} días en ventana. {tope.warning_msg}
+          </p>
+        )}
+      </div>
+
+      <div className="flex flex-wrap gap-2">
+        {lic.estado === "borrador" && (
+          <button onClick={async () => { await licenciasApi.enviar(lic.id); await reload(); }}
+                  className="bg-slate-900 text-white px-3 py-2 rounded">Enviar</button>
+        )}
+        {lic.estado === "enviado" && user?.rol === "medico" && (
+          <>
+            <button onClick={async () => {
+              const d = parseInt(prompt("Días a otorgar:", String(lic.dias_solicitados)) ?? "0", 10);
+              if (Number.isFinite(d)) { await licenciasApi.validar(lic.id, d); await reload(); }
+            }} className="bg-emerald-700 text-white px-3 py-2 rounded">Validar</button>
+            <button onClick={async () => {
+              const m = prompt("Motivo de rechazo:") ?? "";
+              if (m) { await licenciasApi.rechazar(lic.id, m); await reload(); }
+            }} className="bg-red-700 text-white px-3 py-2 rounded">Rechazar</button>
+          </>
+        )}
+        {lic.estado === "validado" && user?.rol === "admin" && (
+          <button onClick={async () => {
+            const m = prompt("Motivo de anulación:") ?? "";
+            if (m) { await licenciasApi.anular(lic.id, m); await reload(); }
+          }} className="bg-amber-700 text-white px-3 py-2 rounded">Anular</button>
+        )}
+      </div>
+    </section>
+  );
+}
+```
+
+> The `prompt()` calls are intentionally minimal v1; v1.1 replaces them with proper modals.
+
+- [ ] **Step 4: Wire routes + commit**
+
+In `App.tsx` (protected):
+```tsx
+<Route path="/licencias" element={<LicenciasListPage />} />
+<Route path="/licencias/nueva" element={<LicenciaForm />} />
+<Route path="/licencias/:id" element={<LicenciaDetailPage />} />
+```
+
+```bash
+pnpm typecheck
+git add frontend/src/features/licencias frontend/src/App.tsx
+git commit -m "feat(frontend): licencias listado + alta con adjunto + detalle con acciones de transición"
+```
+
+---
+
+### Task 9.4: Reportes UI
+
+**Files:**
+- Create: `frontend/src/features/reportes/ReportesPage.tsx`
+- Route in `App.tsx`
+
+```tsx
+// frontend/src/features/reportes/ReportesPage.tsx
+import { useState } from "react";
+import { reportesApi } from "@/api/reportes";
+
+export function ReportesPage() {
+  const [desde, setDesde] = useState("2026-01-01");
+  const [hasta, setHasta] = useState("2026-12-31");
+  const [rows, setRows] = useState<any[]>([]);
+  const [tipo, setTipo] = useState<"por-area"|"por-categoria-diag"|"mensual">("por-area");
+
+  async function cargar() {
+    if (tipo === "por-area") setRows(await reportesApi.porArea(desde, hasta));
+    if (tipo === "por-categoria-diag") setRows(await reportesApi.porCategoriaDiag(desde, hasta));
+    if (tipo === "mensual") setRows(await reportesApi.mensual(desde, hasta));
+  }
+
+  return (
+    <section className="space-y-3">
+      <h1 className="text-2xl font-semibold">Reportes</h1>
+      <div className="flex flex-wrap gap-2 items-end">
+        <label className="text-sm">Desde<input type="date" className="block border rounded p-2" value={desde} onChange={(e) => setDesde(e.target.value)} /></label>
+        <label className="text-sm">Hasta<input type="date" className="block border rounded p-2" value={hasta} onChange={(e) => setHasta(e.target.value)} /></label>
+        <label className="text-sm">Reporte
+          <select className="block border rounded p-2" value={tipo} onChange={(e) => setTipo(e.target.value as any)}>
+            <option value="por-area">Por área</option>
+            <option value="por-categoria-diag">Por categoría diagnóstica</option>
+            <option value="mensual">Mensual</option>
+          </select>
+        </label>
+        <button onClick={cargar} className="bg-slate-900 text-white px-3 py-2 rounded">Cargar</button>
+        <button onClick={() => reportesApi.downloadCsv(tipo, desde, hasta)} className="border px-3 py-2 rounded">Exportar CSV</button>
+      </div>
+      <table className="w-full text-sm bg-white rounded shadow">
+        <thead className="bg-slate-100 text-left">
+          <tr>{rows[0] ? Object.keys(rows[0]).map((k) => <th key={k} className="p-2">{k}</th>) : null}</tr>
+        </thead>
+        <tbody>
+          {rows.map((r, i) => (
+            <tr key={i} className="border-t">
+              {Object.values(r).map((v, j) => <td key={j} className="p-2">{String(v)}</td>)}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </section>
+  );
+}
+```
+
+Route + commit:
+```tsx
+<Route path="/reportes" element={<ReportesPage />} />
+```
+```bash
+git add frontend/src/features/reportes frontend/src/App.tsx
+git commit -m "feat(frontend): reportes UI con export CSV"
+```
+
+---
+
+### Task 9.5: Admin topes (grilla editable)
+
+**Files:**
+- Create: `frontend/src/features/admin/TopesPage.tsx`
+- Route gated by `roles: ["admin"]`
+
+```tsx
+// frontend/src/features/admin/TopesPage.tsx
+import { useEffect, useState } from "react";
+import { catalogosApi, type Categoria, type TipoLicencia } from "@/api/catalogos";
+import { topesApi, type Tope } from "@/api/topes";
+
+const VENTANAS = ["anio-calendario", "anio-aniversario", "sin-limite"] as const;
+
+export function TopesPage() {
+  const [cats, setCats] = useState<Categoria[]>([]);
+  const [tipos, setTipos] = useState<TipoLicencia[]>([]);
+  const [topes, setTopes] = useState<Tope[]>([]);
+
+  async function reload() {
+    setCats(await catalogosApi.categorias());
+    setTipos(await catalogosApi.tiposLicencia());
+    setTopes(await topesApi.list());
+  }
+  useEffect(() => { reload(); }, []);
+
+  function topeFor(catId: string, tipoId: string) {
+    return topes.find((t) => t.categoria_id === catId && t.tipo_licencia_id === tipoId);
+  }
+
+  async function update(catId: string, tipoId: string) {
+    const dias = parseInt(prompt("Días máximos:") ?? "", 10);
+    if (!Number.isFinite(dias) || dias < 0) return;
+    const ventana = (prompt(`Ventana (${VENTANAS.join("/")})`) ?? "anio-calendario") as string;
+    if (!VENTANAS.includes(ventana as any)) return;
+    const desde = prompt("Vigente desde (YYYY-MM-DD):", new Date().toISOString().slice(0, 10)) ?? "";
+    await topesApi.set(catId, tipoId, { dias_maximos: dias, ventana, desde });
+    await reload();
+  }
+
+  return (
+    <section className="space-y-3">
+      <h1 className="text-2xl font-semibold">Topes de días (admin)</h1>
+      <table className="w-full text-sm bg-white rounded shadow">
+        <thead>
+          <tr className="bg-slate-100">
+            <th className="p-2 text-left">Categoría \ Tipo licencia</th>
+            {tipos.map((t) => <th key={t.id} className="p-2">{t.nombre}</th>)}
+          </tr>
+        </thead>
+        <tbody>
+          {cats.map((c) => (
+            <tr key={c.id} className="border-t">
+              <td className="p-2 font-medium">{c.nombre}</td>
+              {tipos.map((t) => {
+                const found = topeFor(c.id, t.id);
+                return (
+                  <td key={t.id} className="p-2">
+                    <button onClick={() => update(c.id, t.id)} className="underline">
+                      {found ? `${found.dias_maximos} (${found.ventana})` : "—"}
+                    </button>
+                  </td>
+                );
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </section>
+  );
+}
+```
+
+Route (admin only):
+```tsx
+<Route element={<ProtectedRoute roles={["admin"]} />}>
+  <Route path="/admin/topes" element={<TopesPage />} />
+</Route>
+```
+
+Commit:
+```bash
+git add frontend/src/features/admin frontend/src/App.tsx
+git commit -m "feat(frontend): admin de topes con grilla editable y versionado"
+```
+
+---
+
+### Task 9.6: Frontend smoke test (Vitest)
+
+**Files:**
+- Create: `frontend/tests/setup.ts`
+- Create: `frontend/tests/App.test.tsx`
+
+```ts
+// frontend/tests/setup.ts
+import "@testing-library/jest-dom/vitest";
+```
+
+```tsx
+// frontend/tests/App.test.tsx
+import { render, screen } from "@testing-library/react";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
+import LoginPage from "../src/routes/login";
+
+it("renders login form", () => {
+  render(
+    <MemoryRouter initialEntries={["/login"]}>
+      <Routes>
+        <Route path="/login" element={<LoginPage />} />
+      </Routes>
+    </MemoryRouter>,
+  );
+  expect(screen.getByText("Medicia-Laboral")).toBeInTheDocument();
+  expect(screen.getByLabelText(/email/i)).toBeInTheDocument();
+});
+```
+
+Run + commit:
+```bash
+pnpm test:unit
+git add frontend/tests
+git commit -m "test(frontend): smoke test del login"
+```
+
+---
