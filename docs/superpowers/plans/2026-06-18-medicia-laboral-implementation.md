@@ -6532,3 +6532,279 @@ git commit -m "test(frontend): smoke test del login"
 ```
 
 ---
+
+## Phase 10 — E2E (Playwright)
+
+### Task 10.1: Playwright setup + docker-compose.ci.yml
+
+**Files:**
+- Create: `frontend/playwright.config.ts`
+- Create: `docker-compose.ci.yml`
+- Create: `frontend/tests/e2e/fixtures.ts`
+
+- [ ] **Step 1: Playwright config**
+
+```ts
+// frontend/playwright.config.ts
+import { defineConfig, devices } from "@playwright/test";
+
+export default defineConfig({
+  testDir: "./tests/e2e",
+  fullyParallel: false,
+  reporter: [["list"], ["html", { open: "never" }]],
+  use: {
+    baseURL: process.env.E2E_BASE_URL ?? "http://localhost:5173",
+    trace: "on-first-retry",
+    screenshot: "only-on-failure",
+  },
+  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
+});
+```
+
+- [ ] **Step 2: `docker-compose.ci.yml`**
+
+```yaml
+# Top-level docker-compose.ci.yml — boots the full stack for E2E.
+name: medicia-ci
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: medicia
+      POSTGRES_PASSWORD: medicia
+      POSTGRES_DB: medicia
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U medicia -d medicia"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  minio:
+    image: minio/minio:RELEASE.2025-01-20T14-49-07Z
+    command: server /data
+    environment:
+      MINIO_ROOT_USER: medicia
+      MINIO_ROOT_PASSWORD: mediciamediciaminio
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    depends_on:
+      postgres: { condition: service_healthy }
+      minio:    { condition: service_healthy }
+    environment:
+      POSTGRES_USER: medicia
+      POSTGRES_PASSWORD: medicia
+      POSTGRES_DB: medicia
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      MINIO_ROOT_USER: medicia
+      MINIO_ROOT_PASSWORD: mediciamediciaminio
+      MINIO_BUCKET: medicia-adjuntos
+      MINIO_ENDPOINT: minio:9000
+      MINIO_USE_SSL: "false"
+      APP_ENV: ci
+      APP_SECRET_KEY: ci-secret-key-at-least-32-chars-long!
+      JWT_ACCESS_TTL_MINUTES: "15"
+      JWT_REFRESH_TTL_DAYS: "1"
+      CORS_ORIGINS: "http://localhost:5173"
+      ADMIN_EMAIL: admin@medicia.local
+      ADMIN_PASSWORD: AdminPass123!XYZ
+    command: >
+      sh -c "alembic upgrade head &&
+             python scripts/seed_dev.py &&
+             uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    ports: ["8000:8000"]
+```
+
+- [ ] **Step 3: Fixtures helper**
+
+```ts
+// frontend/tests/e2e/fixtures.ts
+import { test as base } from "@playwright/test";
+
+export const USERS = {
+  admin:  { email: "admin@medicia.local",  password: "AdminPass123!XYZ" },
+  medico: { email: "medico@medicia.local", password: "MedicoPass123!XYZ" },
+  rrhh:   { email: "rrhh@medicia.local",   password: "RrhhPass123!XYZ" },
+};
+
+export const test = base.extend<{
+  loginAs: (role: keyof typeof USERS) => Promise<void>;
+}>({
+  loginAs: async ({ page }, use) => {
+    await use(async (role) => {
+      await page.goto("/login");
+      await page.getByLabel(/email/i).fill(USERS[role].email);
+      await page.getByLabel(/contraseña/i).fill(USERS[role].password);
+      await page.getByRole("button", { name: /ingresar/i }).click();
+      await page.waitForURL("/");
+    });
+  },
+});
+
+export { expect } from "@playwright/test";
+```
+
+> The seed script in Task 11.2 creates `medico@medicia.local` and `rrhh@medicia.local` with these passwords.
+
+Commit:
+```bash
+git add frontend/playwright.config.ts docker-compose.ci.yml frontend/tests/e2e/fixtures.ts
+git commit -m "test(e2e): playwright + ci compose + fixtures"
+```
+
+---
+
+### Task 10.2: 4 escenarios golden path
+
+**Files:**
+- Create: `frontend/tests/e2e/01-admin-empleado-licencia.spec.ts`
+- Create: `frontend/tests/e2e/02-medico-validar-con-tope.spec.ts`
+- Create: `frontend/tests/e2e/03-medico-rechazar.spec.ts`
+- Create: `frontend/tests/e2e/04-admin-tope-versionado.spec.ts`
+
+- [ ] **Step 1: Escenario 1 — Admin crea empleado, licencia y envía**
+
+```ts
+// frontend/tests/e2e/01-admin-empleado-licencia.spec.ts
+import AxeBuilder from "@axe-core/playwright";
+import { expect, test } from "./fixtures";
+
+test("admin: crea empleado, abre licencia y la envía", async ({ page, loginAs }) => {
+  await loginAs("admin");
+  await page.getByRole("link", { name: "Empleados" }).click();
+  await page.getByRole("link", { name: "Nuevo" }).click();
+
+  const stamp = Date.now().toString();
+  await page.getByLabel(/legajo/i).fill(`L${stamp.slice(-6)}`);
+  await page.getByLabel(/cuil/i).fill("20111111119");
+  await page.getByLabel(/apellido/i).fill("Test");
+  await page.getByLabel(/nombre/i).fill("Empleado");
+  await page.getByLabel(/fecha de ingreso/i).fill("2022-01-15");
+  await page.getByLabel(/categoría/i).selectOption({ label: "Planta permanente" });
+  await page.getByRole("button", { name: /guardar/i }).click();
+  await expect(page).toHaveURL(/\/empleados$/);
+
+  await page.getByRole("link", { name: "Licencias" }).click();
+  await page.getByRole("link", { name: "Nueva" }).click();
+  await page.getByLabel(/empleado/i).selectOption({ index: 1 });
+  await page.getByLabel(/tipo/i).selectOption({ label: "Enfermedad común" });
+  await page.getByLabel(/desde/i).fill("2026-06-01");
+  await page.getByLabel(/hasta/i).fill("2026-06-05");
+  await page.getByRole("button", { name: /guardar/i }).click();
+  await expect(page.getByText("Estado:")).toContainText("borrador");
+  await page.getByRole("button", { name: /enviar/i }).click();
+  await expect(page.getByText("Estado:")).toContainText("enviado");
+
+  const a = await new AxeBuilder({ page }).analyze();
+  expect(a.violations.filter((v) => v.impact === "serious" || v.impact === "critical")).toEqual([]);
+});
+```
+
+- [ ] **Step 2: Escenario 2 — Médico valida con warning de tope**
+
+```ts
+// frontend/tests/e2e/02-medico-validar-con-tope.spec.ts
+import { expect, test } from "./fixtures";
+
+test("médico: valida licencia y ve warning si excede tope", async ({ page, loginAs }) => {
+  await loginAs("medico");
+  await page.getByRole("link", { name: "Licencias" }).click();
+  await page.getByRole("combobox").first().selectOption("enviado");
+  const detalle = page.getByRole("link", { name: /detalle/i }).first();
+  await detalle.click();
+
+  // Stub prompt() before pressing Validar (the inline button uses window.prompt).
+  await page.evaluate(() => { (window as any).prompt = () => "30"; });
+  await page.getByRole("button", { name: /validar/i }).click();
+
+  await expect(page.getByText("Estado:")).toContainText("validado");
+});
+```
+
+- [ ] **Step 3: Escenario 3 — Médico rechaza**
+
+```ts
+// frontend/tests/e2e/03-medico-rechazar.spec.ts
+import { expect, test } from "./fixtures";
+
+test("médico: rechaza licencia con motivo", async ({ page, loginAs }) => {
+  await loginAs("medico");
+  await page.getByRole("link", { name: "Licencias" }).click();
+  await page.getByRole("combobox").first().selectOption("enviado");
+  await page.getByRole("link", { name: /detalle/i }).first().click();
+  await page.evaluate(() => { (window as any).prompt = () => "certificado ilegible"; });
+  await page.getByRole("button", { name: /rechazar/i }).click();
+  await expect(page.getByText("Estado:")).toContainText("rechazado");
+});
+```
+
+- [ ] **Step 4: Escenario 4 — Admin edita tope, versionado**
+
+```ts
+// frontend/tests/e2e/04-admin-tope-versionado.spec.ts
+import { expect, test } from "./fixtures";
+
+test("admin: edita tope y verifica que la celda muestra el nuevo valor", async ({ page, loginAs }) => {
+  await loginAs("admin");
+  await page.getByRole("link", { name: "Topes" }).click();
+  await page.evaluate(() => {
+    let i = 0;
+    (window as any).prompt = (_msg: string, def: string) => {
+      const answers = ["75", "anio-calendario", new Date().toISOString().slice(0, 10)];
+      return answers[i++] ?? def;
+    };
+  });
+  await page.getByRole("button").filter({ hasText: /—|días/ }).first().click();
+  await expect(page.getByText("75 (anio-calendario)").first()).toBeVisible();
+});
+```
+
+- [ ] **Step 5: Add Playwright to CI**
+
+Append to `.github/workflows/ci.yml`:
+```yaml
+  e2e:
+    runs-on: ubuntu-24.04
+    needs: [backend, frontend]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 9 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: pnpm, cache-dependency-path: frontend/pnpm-lock.yaml }
+      - run: docker compose -f docker-compose.ci.yml up -d --build
+      - run: |
+          cd frontend
+          pnpm install --frozen-lockfile
+          pnpm exec playwright install --with-deps chromium
+          pnpm build && pnpm preview --port 5173 &
+          sleep 5
+        env: { VITE_API_BASE_URL: "http://localhost:8000" }
+      - run: cd frontend && pnpm test:e2e
+        env: { E2E_BASE_URL: "http://localhost:5173" }
+      - if: always()
+        run: docker compose -f docker-compose.ci.yml logs --no-color > docker-logs.txt
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with: { name: e2e-artifacts, path: |
+          frontend/playwright-report/
+          docker-logs.txt
+        }
+```
+
+Commit:
+```bash
+git add frontend/tests/e2e .github/workflows/ci.yml
+git commit -m "test(e2e): 4 escenarios golden path + a11y bloqueante + CI job"
+```
+
+---
