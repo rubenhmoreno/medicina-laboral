@@ -34,6 +34,9 @@ def create_app() -> FastAPI:
     from app.modules.diagnosticos.router import router as diagnosticos_router
     app.include_router(diagnosticos_router)
 
+    from app.modules.topes.router import router as topes_router
+    app.include_router(topes_router)
+
     factory = sessionmaker_factory(settings.db_dsn)
     mc = minio_client(settings)
 
