@@ -3,6 +3,7 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.modules.auditoria import repository as audit_repo
 from app.modules.empleados import repository as emp_repo
 from app.modules.licencias import repository as repo
 from app.modules.licencias.calculo import calcular_dias, evaluar_tope
@@ -20,6 +21,19 @@ from app.shared.exceptions import NotFoundError, ValidationError
 
 def _origen_for(rol: Rol) -> OrigenLicencia:
     return OrigenLicencia.MEDICO if rol == Rol.MEDICO else OrigenLicencia.RRHH
+
+
+async def _record_state_change(
+    s: AsyncSession, *, lic: Licencia, frm: EstadoLicencia, to: EstadoLicencia, actor: Usuario, extra: dict | None = None
+) -> None:
+    payload = {"from": frm.value, "to": to.value}
+    if extra:
+        payload.update(extra)
+    await audit_repo.append(
+        s, accion="state_change", entidad="licencia",
+        usuario_id=actor.id, entidad_id=lic.id, payload=payload,
+        ip=None, user_agent=None,
+    )
 
 
 async def crear_licencia(s: AsyncSession, *, payload: LicenciaCreate, actor: Usuario) -> Licencia:
@@ -46,19 +60,15 @@ async def crear_licencia(s: AsyncSession, *, payload: LicenciaCreate, actor: Usu
     return await repo.insert(s, lic)
 
 
-async def _transition(
-    s: AsyncSession, *, lic_id: UUID, action: str, actor: Usuario,
-) -> Licencia:
+async def enviar(s: AsyncSession, *, lic_id: UUID, actor: Usuario) -> Licencia:
     lic = await repo.get(s, lic_id)
     if not lic:
         raise NotFoundError("licencia no encontrada")
-    lic.estado = next_state(lic.estado, action, actor.rol)
+    frm = lic.estado
+    lic.estado = next_state(frm, "enviar", actor.rol)
     await s.flush()
+    await _record_state_change(s, lic=lic, frm=frm, to=lic.estado, actor=actor)
     return lic
-
-
-async def enviar(s: AsyncSession, *, lic_id: UUID, actor: Usuario) -> Licencia:
-    return await _transition(s, lic_id=lic_id, action="enviar", actor=actor)
 
 
 async def validar(
@@ -67,13 +77,15 @@ async def validar(
     lic = await repo.get(s, lic_id)
     if not lic:
         raise NotFoundError("licencia no encontrada")
-    lic.estado = next_state(lic.estado, "validar", actor.rol)
+    frm = lic.estado
+    lic.estado = next_state(frm, "validar", actor.rol)
     lic.dias_otorgados = payload.dias_otorgados
     if payload.observaciones:
         lic.observaciones = (lic.observaciones or "") + f"\n[validación] {payload.observaciones}"
     lic.validado_por = actor.id
     lic.validado_en = datetime.now(timezone.utc)
     await s.flush()
+    await _record_state_change(s, lic=lic, frm=frm, to=lic.estado, actor=actor, extra={"dias_otorgados": payload.dias_otorgados})
     return lic
 
 
@@ -83,9 +95,11 @@ async def rechazar(
     lic = await repo.get(s, lic_id)
     if not lic:
         raise NotFoundError("licencia no encontrada")
-    lic.estado = next_state(lic.estado, "rechazar", actor.rol)
+    frm = lic.estado
+    lic.estado = next_state(frm, "rechazar", actor.rol)
     lic.motivo_rechazo = payload.motivo_rechazo
     await s.flush()
+    await _record_state_change(s, lic=lic, frm=frm, to=lic.estado, actor=actor, extra={"motivo_rechazo": payload.motivo_rechazo})
     return lic
 
 
@@ -95,9 +109,11 @@ async def anular(
     lic = await repo.get(s, lic_id)
     if not lic:
         raise NotFoundError("licencia no encontrada")
-    lic.estado = next_state(lic.estado, "anular", actor.rol)
+    frm = lic.estado
+    lic.estado = next_state(frm, "anular", actor.rol)
     lic.motivo_anulacion = payload.motivo_anulacion
     await s.flush()
+    await _record_state_change(s, lic=lic, frm=frm, to=lic.estado, actor=actor, extra={"motivo_anulacion": payload.motivo_anulacion})
     return lic
 
 
