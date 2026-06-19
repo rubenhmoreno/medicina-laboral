@@ -77,3 +77,16 @@ docker compose -f docker-compose.prod.yml down
 ./scripts/restore.sh ./backups/<timestamp-anterior>
 docker compose -f docker-compose.prod.yml up -d
 ```
+
+## 6) TLS inicial
+
+Después de `bootstrap.sh`, completar el cert HTTPS:
+
+```bash
+docker compose -f docker-compose.prod.yml exec certbot \
+  certbot certonly --webroot -w /var/www/certbot \
+  -d "$DOMAIN_NAME" --agree-tos -m "$ADMIN_EMAIL" --non-interactive
+docker compose -f docker-compose.prod.yml exec nginx nginx -s reload
+```
+
+El servicio `certbot` corre en loop y renueva cada 12h.
