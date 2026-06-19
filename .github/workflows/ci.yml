@@ -45,3 +45,31 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm test:unit -- --coverage
+
+  e2e:
+    runs-on: ubuntu-24.04
+    needs: [backend, frontend]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 9 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: pnpm, cache-dependency-path: frontend/pnpm-lock.yaml }
+      - run: docker compose -f docker-compose.ci.yml up -d --build
+      - run: |
+          cd frontend
+          pnpm install --frozen-lockfile
+          pnpm exec playwright install --with-deps chromium
+          pnpm build && pnpm preview --port 5173 &
+          sleep 5
+        env: { VITE_API_BASE_URL: "http://localhost:8000" }
+      - run: cd frontend && pnpm test:e2e
+        env: { E2E_BASE_URL: "http://localhost:5173" }
+      - if: always()
+        run: docker compose -f docker-compose.ci.yml logs --no-color > docker-logs.txt
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with: { name: e2e-artifacts, path: |
+          frontend/playwright-report/
+          docker-logs.txt
+        }
