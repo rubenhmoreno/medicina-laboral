@@ -17,6 +17,11 @@ def create_app() -> FastAPI:
     install_error_handlers(app)
     install_request_id_middleware(app)
 
+    from app.modules.usuarios.router import router as auth_router, users_router
+
+    app.include_router(auth_router)
+    app.include_router(users_router)
+
     factory = sessionmaker_factory(settings.db_dsn)
     mc = minio_client(settings)
 
