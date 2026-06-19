@@ -8,7 +8,7 @@ from sqlalchemy import pool
 from app.core.settings import get_settings
 
 # Imports below register tables; populated in later tasks.
-# from app.modules.usuarios.models import *  # noqa
+from app.modules.usuarios import models as _usuarios_models  # noqa: F401
 # from app.modules.empleados.models import *  # noqa
 
 from app.core.db_base import Base  # see Task 1.7
