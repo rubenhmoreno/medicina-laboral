@@ -4,6 +4,8 @@ import { ProtectedRoute } from "./auth/ProtectedRoute";
 import LoginPage from "./routes/login";
 import { AppLayout } from "./layout/AppLayout";
 import { DashboardPage } from "./routes/dashboard";
+import { EmpleadosListPage } from "./features/empleados/EmpleadosListPage";
+import { EmpleadoCreateForm } from "./features/empleados/EmpleadoCreateForm";
 
 export default function App() {
   return (
@@ -14,6 +16,8 @@ export default function App() {
           <Route element={<ProtectedRoute />}>
             <Route element={<AppLayout />}>
               <Route path="/" element={<DashboardPage />} />
+              <Route path="/empleados" element={<EmpleadosListPage />} />
+              <Route path="/empleados/nuevo" element={<EmpleadoCreateForm />} />
             </Route>
           </Route>
         </Routes>
