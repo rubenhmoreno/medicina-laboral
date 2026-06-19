@@ -10,6 +10,7 @@ import { LicenciasListPage } from "./features/licencias/LicenciasListPage";
 import { LicenciaForm } from "./features/licencias/LicenciaForm";
 import { LicenciaDetailPage } from "./features/licencias/LicenciaDetailPage";
 import { ReportesPage } from "./features/reportes/ReportesPage";
+import { TopesPage } from "./features/admin/TopesPage";
 
 export default function App() {
   return (
@@ -27,6 +28,9 @@ export default function App() {
               <Route path="/licencias/:id" element={<LicenciaDetailPage />} />
               <Route path="/reportes" element={<ReportesPage />} />
             </Route>
+          </Route>
+          <Route element={<ProtectedRoute roles={["admin"]} />}>
+            <Route path="/admin/topes" element={<TopesPage />} />
           </Route>
         </Routes>
       </BrowserRouter>
