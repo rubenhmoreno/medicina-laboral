@@ -6,6 +6,9 @@ import { AppLayout } from "./layout/AppLayout";
 import { DashboardPage } from "./routes/dashboard";
 import { EmpleadosListPage } from "./features/empleados/EmpleadosListPage";
 import { EmpleadoCreateForm } from "./features/empleados/EmpleadoCreateForm";
+import { LicenciasListPage } from "./features/licencias/LicenciasListPage";
+import { LicenciaForm } from "./features/licencias/LicenciaForm";
+import { LicenciaDetailPage } from "./features/licencias/LicenciaDetailPage";
 
 export default function App() {
   return (
@@ -18,6 +21,9 @@ export default function App() {
               <Route path="/" element={<DashboardPage />} />
               <Route path="/empleados" element={<EmpleadosListPage />} />
               <Route path="/empleados/nuevo" element={<EmpleadoCreateForm />} />
+              <Route path="/licencias" element={<LicenciasListPage />} />
+              <Route path="/licencias/nueva" element={<LicenciaForm />} />
+              <Route path="/licencias/:id" element={<LicenciaDetailPage />} />
             </Route>
           </Route>
         </Routes>
