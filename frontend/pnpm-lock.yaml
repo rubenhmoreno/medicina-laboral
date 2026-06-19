@@ -28,10 +28,10 @@ importers:
         version: 3.25.76
     devDependencies:
       '@axe-core/playwright':
-        specifier: ^4.10.0
+        specifier: ^4.11.3
         version: 4.11.3(playwright-core@1.61.0)
       '@playwright/test':
-        specifier: ^1.48.2
+        specifier: ^1.61.0
         version: 1.61.0
       '@testing-library/jest-dom':
         specifier: ^6.6.3
