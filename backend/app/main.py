@@ -43,6 +43,9 @@ def create_app() -> FastAPI:
     from app.modules.adjuntos.router import router as adjuntos_router
     app.include_router(adjuntos_router)
 
+    from app.modules.licencias.router import router as licencias_router
+    app.include_router(licencias_router)
+
     factory = sessionmaker_factory(settings.db_dsn)
     mc = minio_client(settings)
 
