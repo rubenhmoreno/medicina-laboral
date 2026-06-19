@@ -18,6 +18,8 @@ from app.modules.categorias import models as _categorias_models  # noqa: F401
 from app.modules.tipos_licencia import models as _tipos_licencia_models  # noqa: F401
 from app.modules.diagnosticos import models as _diagnosticos_models  # noqa: F401
 from app.modules.topes import models as _topes_models  # noqa: F401
+from app.modules.licencias import models as _lic_models  # noqa: F401
+from app.modules.adjuntos import models as _adj_models   # noqa: F401
 
 config = context.config
 if config.config_file_name:
