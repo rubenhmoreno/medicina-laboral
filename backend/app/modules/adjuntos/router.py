@@ -22,7 +22,8 @@ def _mc(settings: Settings = Depends(get_settings)) -> Minio:
 @router.post("", response_model=AdjuntoOut, status_code=201,
              dependencies=[Depends(require_role(Rol.ADMIN, Rol.RRHH, Rol.MEDICO))])
 async def upload(
-    licencia_id: UUID = Form(...),
+    licencia_id: UUID | None = Form(default=None),
+    atencion_id: UUID | None = Form(default=None),
     file: UploadFile = File(...),
     s: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
@@ -31,11 +32,33 @@ async def upload(
 ):
     payload = await file.read()
     return await upload_adjunto(
-        s, mc=mc, settings=settings, licencia_id=licencia_id,
+        s, mc=mc, settings=settings,
+        licencia_id=licencia_id,
+        atencion_id=atencion_id,
         nombre_original=file.filename or "archivo",
         mime_type=file.content_type or "application/octet-stream",
         payload=payload, usuario_id=user.id,
     )
+
+
+@router.get("/by-licencia/{licencia_id}", response_model=list[AdjuntoOut])
+async def list_by_licencia(
+    licencia_id: UUID,
+    s: AsyncSession = Depends(get_db),
+    _user: Usuario = Depends(current_user),
+):
+    from app.modules.adjuntos import repository as repo
+    return await repo.list_for_licencia(s, licencia_id)
+
+
+@router.get("/by-atencion/{atencion_id}", response_model=list[AdjuntoOut])
+async def list_by_atencion(
+    atencion_id: UUID,
+    s: AsyncSession = Depends(get_db),
+    _user: Usuario = Depends(current_user),
+):
+    from app.modules.adjuntos import repository as repo
+    return await repo.list_for_atencion(s, atencion_id)
 
 
 @router.get("/{id_}/download", response_model=AdjuntoDownload)

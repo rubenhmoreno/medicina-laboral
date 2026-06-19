@@ -11,9 +11,9 @@ jobs:
       postgres:
         image: postgres:16-alpine
         env:
-          POSTGRES_USER: medicia
-          POSTGRES_PASSWORD: medicia
-          POSTGRES_DB: medicia_test
+          POSTGRES_USER: medicina
+          POSTGRES_PASSWORD: medicina
+          POSTGRES_DB: medicina_test
         ports: ["5432:5432"]
         options: --health-cmd "pg_isready" --health-interval 5s --health-timeout 5s --health-retries 10
     defaults: { run: { working-directory: backend } }
@@ -29,9 +29,9 @@ jobs:
       - run: uv run pytest --cov=app --cov-report=xml --cov-fail-under=80
         env:
           POSTGRES_HOST: localhost
-          POSTGRES_USER: medicia
-          POSTGRES_PASSWORD: medicia
-          POSTGRES_DB: medicia_test
+          POSTGRES_USER: medicina
+          POSTGRES_PASSWORD: medicina
+          POSTGRES_DB: medicina_test
 
   frontend:
     runs-on: ubuntu-24.04

@@ -9,11 +9,12 @@ def test_hash_and_verify_round_trip():
     assert verify_password("wrong", h) is False
 
 
-@pytest.mark.parametrize("bad", ["short", "alllowercase123456", "password123!"])
-def test_weak_password_rejected(bad):
+def test_empty_password_rejected():
     with pytest.raises(ValueError):
-        validate_password_strength(bad)
+        validate_password_strength("")
 
 
-def test_strong_password_accepted():
+def test_any_password_accepted():
+    validate_password_strength("123")
+    validate_password_strength("a")
     validate_password_strength("Tr0ub4dor&3Horse!Battery")

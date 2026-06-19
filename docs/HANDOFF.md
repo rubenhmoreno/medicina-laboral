@@ -22,7 +22,7 @@ Trabajás en `/home/mva/medicia-laboral`, rama `main`, con consentimiento explí
 - **Sin integraciones externas en v1** (sin SSO, sin padrón, sin API ART).
 - **Portabilidad es requisito de primer nivel:** todo va por `.env`, scripts `scripts/{bootstrap,backup,restore,migrate}.sh` deben permitirle a Claude Code futuro mover el sistema entre servidores sin intervención manual.
 
-**El nombre del directorio `medicia-laboral` es intencional** (`medicia`, no `medicina`) — confirmado por el usuario. NO renombrar.
+**Nota:** el nombre del directorio raíz sigue siendo `medicia-laboral` por conveniencia (renombrarlo requiere mover el repo git), pero el nombre oficial del sistema es **medicina-laboral**. Todas las referencias en código, UI, CI y configuración usan "medicina".
 
 ---
 

@@ -1,5 +1,6 @@
 # backend/app/main.py
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
 from app.core.db import sessionmaker_factory
@@ -13,9 +14,17 @@ from app.shared.error_handler import install_error_handlers
 def create_app() -> FastAPI:
     settings = get_settings()
     configure_logging(settings.log_level)
-    app = FastAPI(title="medicia-laboral", version="0.1.0")
+    app = FastAPI(title="medicina-laboral", version="0.1.0")
     install_error_handlers(app)
     install_request_id_middleware(app)
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors_origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
     from app.modules.usuarios.router import router as auth_router, users_router
 
@@ -31,9 +40,6 @@ def create_app() -> FastAPI:
     from app.modules.tipos_licencia.router import router as tipos_licencia_router
     app.include_router(tipos_licencia_router)
 
-    from app.modules.diagnosticos.router import router as diagnosticos_router
-    app.include_router(diagnosticos_router)
-
     from app.modules.topes.router import router as topes_router
     app.include_router(topes_router)
 
@@ -48,6 +54,24 @@ def create_app() -> FastAPI:
 
     from app.modules.reportes.router import router as reportes_router
     app.include_router(reportes_router)
+
+    from app.modules.atenciones.router import router as atenciones_router
+    app.include_router(atenciones_router)
+
+    from app.modules.signos_vitales.router import router as signos_vitales_router
+    app.include_router(signos_vitales_router)
+
+    from app.modules.evoluciones.router import router as evoluciones_router
+    app.include_router(evoluciones_router)
+
+    from app.modules.recetas.router import router as recetas_router
+    app.include_router(recetas_router)
+
+    from app.modules.pedidos.router import router as pedidos_router
+    app.include_router(pedidos_router)
+
+    from app.modules.estudios_catalogo.router import router as estudios_catalogo_router
+    app.include_router(estudios_catalogo_router)
 
     factory = sessionmaker_factory(settings.db_dsn)
     mc = minio_client(settings)

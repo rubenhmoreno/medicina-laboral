@@ -2,14 +2,14 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.modules.usuarios.models import Rol
 
 
 class UsuarioCreate(BaseModel):
-    email: EmailStr
-    password: str = Field(min_length=12, max_length=128)
+    email: str = Field(min_length=1, max_length=255)
+    password: str = Field(min_length=1, max_length=128)
     nombre: str | None = None
     rol: Rol
     matricula: str | None = None
@@ -26,7 +26,7 @@ class UsuarioOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
-    email: EmailStr
+    email: str
     nombre: str | None
     rol: Rol
     matricula: str | None
@@ -35,7 +35,7 @@ class UsuarioOut(BaseModel):
 
 
 class LoginIn(BaseModel):
-    email: EmailStr
+    email: str
     password: str
 
 

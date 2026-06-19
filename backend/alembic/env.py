@@ -16,10 +16,15 @@ from app.modules.auditoria.models import Auditoria  # noqa: F401
 from app.modules.areas import models as _areas_models  # noqa: F401
 from app.modules.categorias import models as _categorias_models  # noqa: F401
 from app.modules.tipos_licencia import models as _tipos_licencia_models  # noqa: F401
-from app.modules.diagnosticos import models as _diagnosticos_models  # noqa: F401
 from app.modules.topes import models as _topes_models  # noqa: F401
 from app.modules.licencias import models as _lic_models  # noqa: F401
 from app.modules.adjuntos import models as _adj_models   # noqa: F401
+from app.modules.atenciones import models as _aten_models  # noqa: F401
+from app.modules.signos_vitales import models as _signos_models  # noqa: F401
+from app.modules.evoluciones import models as _evol_models  # noqa: F401
+from app.modules.recetas import models as _recetas_models  # noqa: F401
+from app.modules.pedidos import models as _pedidos_models  # noqa: F401
+from app.modules.estudios_catalogo import models as _estudios_models  # noqa: F401
 
 config = context.config
 if config.config_file_name:

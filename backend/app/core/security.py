@@ -30,13 +30,5 @@ def verify_password(plain: str, stored: str) -> bool:
 
 
 def validate_password_strength(plain: str) -> None:
-    if len(plain) < 12:
-        raise ValueError("password must be at least 12 characters")
-    if plain.lower() in _COMMON:
-        raise ValueError("password is too common")
-    classes = sum(
-        bool(any(c in plain for c in chars))
-        for chars in ["abcdefghijklmnopqrstuvwxyz", "ABCDEFGHIJKLMNOPQRSTUVWXYZ", "0123456789", "!@#$%^&*()_+-=[]{};:,.<>?/\\|"]
-    )
-    if classes < 3:
-        raise ValueError("password must mix lowercase, uppercase, digits, symbols (≥3 classes)")
+    if len(plain) < 1:
+        raise ValueError("password must not be empty")

@@ -1,5 +1,5 @@
 # docker-compose.prod.yml — stack productivo: postgres + minio + backend + nginx + certbot.
-name: medicia-prod
+name: medicina-prod
 
 services:
   postgres:
@@ -72,7 +72,7 @@ services:
     ports: ["80:80", "443:443"]
     env_file: .env
     volumes:
-      - ./nginx/medicia.conf.template:/etc/nginx/templates/medicia.conf.template:ro
+      - ./nginx/medicina.conf.template:/etc/nginx/templates/medicina.conf.template:ro
       - ./frontend/dist:/usr/share/nginx/html:ro
       - certbot_certs:/etc/letsencrypt:ro
       - certbot_webroot:/var/www/certbot

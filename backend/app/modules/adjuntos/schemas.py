@@ -6,7 +6,8 @@ from pydantic import BaseModel, ConfigDict
 class AdjuntoOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: UUID
-    licencia_id: UUID
+    licencia_id: UUID | None
+    atencion_id: UUID | None
     nombre_original: str
     mime_type: str
     size_bytes: int

@@ -15,3 +15,8 @@ async def get(s: AsyncSession, id_: UUID) -> Adjunto | None:
 async def list_for_licencia(s: AsyncSession, licencia_id: UUID) -> list[Adjunto]:
     stmt = select(Adjunto).where(Adjunto.licencia_id == licencia_id).order_by(Adjunto.created_at)
     return list((await s.execute(stmt)).scalars())
+
+
+async def list_for_atencion(s: AsyncSession, atencion_id: UUID) -> list[Adjunto]:
+    stmt = select(Adjunto).where(Adjunto.atencion_id == atencion_id).order_by(Adjunto.created_at)
+    return list((await s.execute(stmt)).scalars())

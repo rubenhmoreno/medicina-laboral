@@ -33,9 +33,7 @@ class Licencia(Base):
     id: Mapped[UUID] = mapped_column(PgUUID(as_uuid=True), primary_key=True, default=new_uuid7)
     empleado_id: Mapped[UUID] = mapped_column(PgUUID(as_uuid=True), ForeignKey("empleados.id"))
     tipo_licencia_id: Mapped[UUID] = mapped_column(PgUUID(as_uuid=True), ForeignKey("tipos_licencia.id"))
-    diagnostico_id: Mapped[UUID | None] = mapped_column(
-        PgUUID(as_uuid=True), ForeignKey("diagnosticos.id"), nullable=True
-    )
+    diagnostico: Mapped[str | None] = mapped_column(String(500), nullable=True)
     fecha_desde: Mapped[date] = mapped_column(Date)
     fecha_hasta: Mapped[date] = mapped_column(Date)
     dias_solicitados: Mapped[int] = mapped_column(Integer)

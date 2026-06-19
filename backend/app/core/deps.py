@@ -24,7 +24,12 @@ async def get_db(
 ) -> AsyncGenerator[AsyncSession, None]:
     f = _factory(settings.db_dsn)
     async with f() as session:
-        yield session
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
 
 
 async def current_user(

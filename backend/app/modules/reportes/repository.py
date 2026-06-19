@@ -22,16 +22,14 @@ async def ausentismo_por_area(s: AsyncSession, desde: date, hasta: date) -> list
 
 
 async def ausentismo_por_categoria_diag(s: AsyncSession, desde: date, hasta: date) -> list[dict]:
-    # Aggregates by DIAGNOSTIC CATEGORY only — never by description (PII).
     sql = text("""
-        SELECT d.categoria AS categoria_diagnostico,
+        SELECT l.diagnostico AS categoria_diagnostico,
                COUNT(l.id) AS total_licencias,
                COALESCE(SUM(l.dias_otorgados), 0) AS total_dias_otorgados
         FROM licencias l
-        LEFT JOIN diagnosticos d ON d.id = l.diagnostico_id
         WHERE l.estado = 'VALIDADO'::estado_licencia
           AND l.fecha_desde BETWEEN :desde AND :hasta
-        GROUP BY d.categoria
+        GROUP BY l.diagnostico
         ORDER BY total_dias_otorgados DESC
     """)
     res = await s.execute(sql, {"desde": desde, "hasta": hasta})

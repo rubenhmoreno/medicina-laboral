@@ -15,3 +15,15 @@ async def get(s: AsyncSession, id_: UUID) -> TipoLicencia | None:
 
 async def insert(s: AsyncSession, t: TipoLicencia) -> TipoLicencia:
     s.add(t); await s.flush(); return t
+
+
+async def update(s: AsyncSession, t: TipoLicencia, **kwargs: object) -> TipoLicencia:
+    for k, v in kwargs.items():
+        setattr(t, k, v)
+    await s.flush()
+    return t
+
+
+async def delete(s: AsyncSession, t: TipoLicencia) -> None:
+    await s.delete(t)
+    await s.flush()

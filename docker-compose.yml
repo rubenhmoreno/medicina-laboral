@@ -1,4 +1,4 @@
-name: medicia-laboral
+name: medicina-laboral
 
 services:
   postgres:

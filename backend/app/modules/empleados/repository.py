@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.empleados.models import Empleado
@@ -19,6 +19,11 @@ async def list_(s: AsyncSession, q: str | None = None, limit: int = 50, offset: 
     return list((await s.execute(stmt)).scalars())
 
 
+async def count(s: AsyncSession) -> int:
+    result = await s.execute(select(func.count()).select_from(Empleado))
+    return result.scalar_one()
+
+
 async def get(s: AsyncSession, id_: UUID) -> Empleado | None:
     return (await s.execute(select(Empleado).where(Empleado.id == id_))).scalar_one_or_none()
 
@@ -33,3 +38,10 @@ async def by_cuil(s: AsyncSession, cuil: str) -> Empleado | None:
 
 async def insert(s: AsyncSession, e: Empleado) -> Empleado:
     s.add(e); await s.flush(); return e
+
+
+async def update(s: AsyncSession, e: Empleado, **kwargs: object) -> Empleado:
+    for k, v in kwargs.items():
+        setattr(e, k, v)
+    await s.flush()
+    return e

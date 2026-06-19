@@ -16,6 +16,6 @@ it("renders login form", () => {
       </Routes>
     </MemoryRouter>,
   );
-  expect(screen.getByText("Medicia-Laboral")).toBeInTheDocument();
-  expect(screen.getByLabelText(/email/i)).toBeInTheDocument();
+  expect(screen.getByText("Medicina Laboral")).toBeInTheDocument();
+  expect(screen.getByLabelText(/usuario/i)).toBeInTheDocument();
 });

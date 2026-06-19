@@ -1,7 +1,7 @@
 [project]
-name = "medicia-laboral-backend"
+name = "medicina-laboral-backend"
 version = "0.1.0"
-description = "Backend for medicia-laboral occupational medicine system"
+description = "Backend for medicina-laboral occupational medicine system"
 readme = "../README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -20,6 +20,7 @@ dependencies = [
   "minio>=7.2",
   "uuid7>=0.1",
   "email-validator>=2.2",
+  "reportlab>=4.0",
 ]
 
 [dependency-groups]

@@ -1,4 +1,4 @@
-# medicia-laboral
+# medicina-laboral
 
 Sistema de gestión de ausentismo y licencias médicas.
 
@@ -16,6 +16,6 @@ Frontend: http://localhost:5173
 
 ## Docs
 
-- Spec: `docs/superpowers/specs/2026-06-18-medicia-laboral-design.md`
-- Plan: `docs/superpowers/plans/2026-06-18-medicia-laboral-implementation.md`
+- Spec: `docs/superpowers/specs/`
+- Plan: `docs/superpowers/plans/`
 - Migration: `docs/MIGRATION.md`

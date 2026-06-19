@@ -20,3 +20,15 @@ async def by_name(s: AsyncSession, nombre: str) -> Area | None:
 
 async def insert(s: AsyncSession, a: Area) -> Area:
     s.add(a); await s.flush(); return a
+
+
+async def update(s: AsyncSession, a: Area, **kwargs: object) -> Area:
+    for k, v in kwargs.items():
+        setattr(a, k, v)
+    await s.flush()
+    return a
+
+
+async def delete(s: AsyncSession, a: Area) -> None:
+    await s.delete(a)
+    await s.flush()

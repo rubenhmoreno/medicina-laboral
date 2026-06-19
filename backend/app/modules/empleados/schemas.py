@@ -8,7 +8,7 @@ _CUIL_RE = r"^\d{2}-\d{8}-\d{1}$|^\d{11}$"
 
 
 class EmpleadoCreate(BaseModel):
-    legajo: str = Field(min_length=1, max_length=40)
+    legajo: str = Field(min_length=1, max_length=40, pattern=r"^\d+$")
     cuil: str = Field(pattern=_CUIL_RE)
     nombre: str
     apellido: str

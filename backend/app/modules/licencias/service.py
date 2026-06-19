@@ -46,7 +46,7 @@ async def crear_licencia(s: AsyncSession, *, payload: LicenciaCreate, actor: Usu
     lic = Licencia(
         empleado_id=payload.empleado_id,
         tipo_licencia_id=payload.tipo_licencia_id,
-        diagnostico_id=payload.diagnostico_id,
+        diagnostico=payload.diagnostico,
         fecha_desde=payload.fecha_desde,
         fecha_hasta=payload.fecha_hasta,
         dias_solicitados=dias,

@@ -28,6 +28,7 @@ async def list_(
     area_id: UUID | None = Query(default=None),
     desde: date | None = Query(default=None),
     hasta: date | None = Query(default=None),
+    vigente: bool = Query(default=False),
     limit: int = Query(default=50, le=200),
     offset: int = Query(default=0, ge=0),
     s: AsyncSession = Depends(get_db),
@@ -35,23 +36,34 @@ async def list_(
 ):
     rows = await repo.list_(s,
         estado=estado, empleado_id=empleado_id, area_id=area_id,
-        desde=desde, hasta=hasta, limit=limit, offset=offset)
+        desde=desde, hasta=hasta, vigente=vigente, limit=limit, offset=offset)
     # Hide sensitive fields for RRHH
     if user.rol == Rol.RRHH:
         for r in rows:
-            r.diagnostico_id = None
+            r.diagnostico = None
             r.observaciones = None
             r.motivo_rechazo = None
     return rows
 
 
+@router.get("/count")
+async def count_licencias(
+    estado: EstadoLicencia | None = Query(default=None),
+    vigente: bool = Query(default=False),
+    s: AsyncSession = Depends(get_db),
+    _user: Usuario = Depends(current_user),
+):
+    total = await repo.count(s, estado=estado, vigente=vigente)
+    return {"count": total}
+
+
 @router.get("/{id_}", response_model=LicenciaOut)
 async def get_one(id_: UUID, s: AsyncSession = Depends(get_db), user: Usuario = Depends(current_user)):
-    lic = await repo.get(s, id_)
+    lic = await repo.get_enriched(s, id_)
     if not lic:
         raise NotFoundError("licencia no encontrada")
     if user.rol == Rol.RRHH:
-        lic.diagnostico_id = None
+        lic.diagnostico = None
         lic.observaciones = None
         lic.motivo_rechazo = None
     return lic

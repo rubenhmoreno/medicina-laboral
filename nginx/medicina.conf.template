@@ -1,4 +1,4 @@
-# nginx/medicia.conf.template — renderiza ${DOMAIN_NAME} en runtime.
+# nginx/medicina.conf.template — renderiza ${DOMAIN_NAME} en runtime.
 server {
     listen 80;
     server_name ${DOMAIN_NAME};
@@ -21,7 +21,7 @@ server {
     add_header X-Frame-Options "DENY" always;
     add_header Referrer-Policy "same-origin" always;
     add_header Permissions-Policy "geolocation=(), microphone=(), camera=()" always;
-    add_header Content-Security-Policy "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'self'" always;
+    add_header Content-Security-Policy "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; script-src 'self'; connect-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'self'" always;
 
     client_max_body_size 12m;
 

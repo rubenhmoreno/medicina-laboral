@@ -4,18 +4,21 @@ from typing import Any
 from pydantic import Field, SecretStr, field_validator
 from pydantic.fields import FieldInfo
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic_settings.sources import EnvSettingsSource, PydanticBaseSettingsSource
+from pydantic_settings.sources import DotEnvSettingsSource, EnvSettingsSource, PydanticBaseSettingsSource
 
 
 class CustomEnvSettingsSource(EnvSettingsSource):
     def decode_complex_value(self, field_name: str, field: FieldInfo, value: Any) -> Any:
-        # Don't JSON-parse, just return the raw string
-        # Let validators handle the parsing
+        return value
+
+
+class CustomDotEnvSettingsSource(DotEnvSettingsSource):
+    def decode_complex_value(self, field_name: str, field: FieldInfo, value: Any) -> Any:
         return value
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore", case_sensitive=False)
+    model_config = SettingsConfigDict(env_file="../.env", extra="ignore", case_sensitive=False)
 
     @classmethod
     def settings_customise_sources(
@@ -29,7 +32,7 @@ class Settings(BaseSettings):
         return (
             init_settings,
             CustomEnvSettingsSource(settings_cls),
-            dotenv_settings,
+            CustomDotEnvSettingsSource(settings_cls),
             file_secret_settings,
         )
 

@@ -1,14 +1,16 @@
 import { http } from "./http";
 
 export type Adjunto = {
-  id: string; licencia_id: string; nombre_original: string; mime_type: string;
+  id: string; licencia_id: string | null; atencion_id: string | null;
+  nombre_original: string; mime_type: string;
   size_bytes: number; sha256: string; created_at: string;
 };
 
 export const adjuntosApi = {
-  upload: (licencia_id: string, file: File) => {
+  upload: (file: File, opts: { licencia_id?: string; atencion_id?: string }) => {
     const fd = new FormData();
-    fd.append("licencia_id", licencia_id);
+    if (opts.licencia_id) fd.append("licencia_id", opts.licencia_id);
+    if (opts.atencion_id) fd.append("atencion_id", opts.atencion_id);
     fd.append("file", file);
     return http.post<Adjunto>("/api/adjuntos", fd, { headers: { "Content-Type": "multipart/form-data" } }).then((r) => r.data);
   },

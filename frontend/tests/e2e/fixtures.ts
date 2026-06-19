@@ -1,9 +1,9 @@
 import { test as base } from "@playwright/test";
 
 export const USERS = {
-  admin:  { email: "admin@medicia.local",  password: "AdminPass123!XYZ" },
-  medico: { email: "medico@medicia.local", password: "MedicoPass123!XYZ" },
-  rrhh:   { email: "rrhh@medicia.local",   password: "RrhhPass123!XYZ" },
+  admin:  { email: "admin",  password: "123" },
+  medico: { email: "medico", password: "123" },
+  rrhh:   { email: "secretaria",   password: "123" },
 };
 
 export const test = base.extend<{
@@ -12,8 +12,8 @@ export const test = base.extend<{
   loginAs: async ({ page }, use) => {
     await use(async (role) => {
       await page.goto("/login");
-      await page.getByLabel(/email/i).fill(USERS[role].email);
-      await page.getByLabel(/contraseña/i).fill(USERS[role].password);
+      await page.getByLabel(/usuario/i).fill(USERS[role].email);
+      await page.getByLabel(/clave/i).fill(USERS[role].password);
       await page.getByRole("button", { name: /ingresar/i }).click();
       await page.waitForURL("/");
     });

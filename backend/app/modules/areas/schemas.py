@@ -7,6 +7,11 @@ class AreaCreate(BaseModel):
     parent_id: UUID | None = None
 
 
+class AreaUpdate(BaseModel):
+    nombre: str | None = None
+    parent_id: UUID | None = None
+
+
 class AreaOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: UUID

@@ -15,3 +15,15 @@ async def get(s: AsyncSession, id_: UUID) -> CategoriaLaboral | None:
 
 async def insert(s: AsyncSession, c: CategoriaLaboral) -> CategoriaLaboral:
     s.add(c); await s.flush(); return c
+
+
+async def update(s: AsyncSession, c: CategoriaLaboral, **kwargs: object) -> CategoriaLaboral:
+    for k, v in kwargs.items():
+        setattr(c, k, v)
+    await s.flush()
+    return c
+
+
+async def delete(s: AsyncSession, c: CategoriaLaboral) -> None:
+    await s.delete(c)
+    await s.flush()

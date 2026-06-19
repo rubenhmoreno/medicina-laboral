@@ -1,7 +1,7 @@
 # Migración entre servidores
 
 Este runbook está pensado para que Claude Code (o un humano) pueda mover el sistema
-medicia-laboral de un servidor a otro siguiendo pasos secuenciales sin contexto adicional.
+medicina-laboral de un servidor a otro siguiendo pasos secuenciales sin contexto adicional.
 
 ## 0) Pre-requisitos en el servidor destino
 
@@ -16,9 +16,9 @@ medicia-laboral de un servidor a otro siguiendo pasos secuenciales sin contexto 
 
 ```bash
 ssh user@servidor
-sudo mkdir -p /opt/medicia-laboral && sudo chown $USER /opt/medicia-laboral
-git clone <repo> /opt/medicia-laboral
-cd /opt/medicia-laboral
+sudo mkdir -p /opt/medicina-laboral && sudo chown $USER /opt/medicina-laboral
+git clone <repo> /opt/medicina-laboral
+cd /opt/medicina-laboral
 cp .env.example .env
 # Editar .env y completar:
 #  - POSTGRES_PASSWORD
@@ -37,8 +37,8 @@ curl -fsS http://localhost/readyz
 Desde el servidor origen, con la instalación corriendo:
 
 ```bash
-cd /opt/medicia-laboral
-./scripts/migrate.sh user@servidor-destino /opt/medicia-laboral
+cd /opt/medicina-laboral
+./scripts/migrate.sh user@servidor-destino /opt/medicina-laboral
 ```
 
 El script:
@@ -54,7 +54,7 @@ El script:
 ## 3) Smoke-test post-migración
 
 ```bash
-ssh user@servidor-destino "cd /opt/medicia-laboral && curl -fsS http://localhost/readyz"
+ssh user@servidor-destino "cd /opt/medicina-laboral && curl -fsS http://localhost/readyz"
 # Login con ADMIN_EMAIL/ADMIN_PASSWORD y verificar:
 #   - Listado de empleados
 #   - Listado de licencias
@@ -66,13 +66,13 @@ ssh user@servidor-destino "cd /opt/medicia-laboral && curl -fsS http://localhost
 Agregar al cron del host del servidor de producción:
 
 ```cron
-0 3 * * * cd /opt/medicia-laboral && ./scripts/backup.sh >> /var/log/medicia-backup.log 2>&1
+0 3 * * * cd /opt/medicina-laboral && ./scripts/backup.sh >> /var/log/medicina-backup.log 2>&1
 ```
 
 ## 5) Rollback de emergencia
 
 ```bash
-cd /opt/medicia-laboral
+cd /opt/medicina-laboral
 docker compose -f docker-compose.prod.yml down
 ./scripts/restore.sh ./backups/<timestamp-anterior>
 docker compose -f docker-compose.prod.yml up -d

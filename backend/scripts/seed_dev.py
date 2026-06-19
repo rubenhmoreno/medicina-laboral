@@ -1,7 +1,5 @@
 """Idempotent seed for dev/CI. Creates 1 admin + 1 médico + 1 rrhh + base catálogos."""
 import asyncio
-import os
-from datetime import date
 
 from app.core.db import sessionmaker_factory
 from app.core.settings import get_settings
@@ -21,23 +19,23 @@ async def main():
     factory = sessionmaker_factory(SETTINGS.db_dsn)
     async with factory() as s:
         # Users
-        if not await get_by_email(s, os.environ["ADMIN_EMAIL"]):
+        if not await get_by_email(s, "admin"):
             await create_user(s, UsuarioCreate(
-                email=os.environ["ADMIN_EMAIL"],
-                password=os.environ["ADMIN_PASSWORD"],
-                nombre="Admin", rol=Rol.ADMIN,
+                email="admin",
+                password="123",
+                nombre="Administrador", rol=Rol.ADMIN,
             ))
-        if not await get_by_email(s, "medico@medicia.local"):
+        if not await get_by_email(s, "medico"):
             await create_user(s, UsuarioCreate(
-                email="medico@medicia.local",
-                password="MedicoPass123!XYZ",
-                nombre="Médico", rol=Rol.MEDICO, matricula="MN12345",
+                email="medico",
+                password="123",
+                nombre="Medico", rol=Rol.MEDICO, matricula="MN12345",
             ))
-        if not await get_by_email(s, "rrhh@medicia.local"):
+        if not await get_by_email(s, "secretaria"):
             await create_user(s, UsuarioCreate(
-                email="rrhh@medicia.local",
-                password="RrhhPass123!XYZ",
-                nombre="RRHH", rol=Rol.RRHH,
+                email="secretaria",
+                password="123",
+                nombre="Secretaria", rol=Rol.RRHH,
             ))
 
         # Categorías base
