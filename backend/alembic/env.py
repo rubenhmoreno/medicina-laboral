@@ -12,6 +12,7 @@ from app.core.settings import get_settings
 # from app.modules.empleados.models import *  # noqa
 
 from app.core.db_base import Base  # see Task 1.7
+from app.modules.auditoria.models import Auditoria  # noqa: F401
 
 config = context.config
 if config.config_file_name:
