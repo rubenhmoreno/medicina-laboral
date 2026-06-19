@@ -9,7 +9,7 @@ from app.core.settings import get_settings
 
 # Imports below register tables; populated in later tasks.
 from app.modules.usuarios import models as _usuarios_models  # noqa: F401
-# from app.modules.empleados.models import *  # noqa
+from app.modules.empleados import models as _empleados_models  # noqa: F401
 
 from app.core.db_base import Base  # see Task 1.7
 from app.modules.auditoria.models import Auditoria  # noqa: F401
