@@ -13,6 +13,7 @@ from app.modules.usuarios import models as _usuarios_models  # noqa: F401
 
 from app.core.db_base import Base  # see Task 1.7
 from app.modules.auditoria.models import Auditoria  # noqa: F401
+from app.modules.areas import models as _areas_models  # noqa: F401
 
 config = context.config
 if config.config_file_name:
