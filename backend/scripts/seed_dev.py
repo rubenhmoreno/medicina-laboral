@@ -5,6 +5,8 @@ from app.core.db import sessionmaker_factory
 from app.core.settings import get_settings
 from app.modules.categorias.schemas import CategoriaCreate
 from app.modules.categorias.service import create_categoria
+from app.modules.configuracion.models import Configuracion
+from app.modules.configuracion.repository import get_by_clave
 from app.modules.tipos_licencia.schemas import TipoLicenciaCreate
 from app.modules.tipos_licencia.service import create_tipo
 from app.modules.usuarios.models import Rol
@@ -61,6 +63,21 @@ async def main():
                 await create_tipo(s, TipoLicenciaCreate(codigo=codigo, nombre=nombre))
             except Exception:
                 pass
+
+        # Configuración defaults
+        config_defaults = [
+            ("pdf_header_linea1", "Municipalidad de Villa Allende", "Primera línea del encabezado de PDFs"),
+            ("pdf_header_linea2", "Servicio de Medicina Laboral", "Segunda línea del encabezado de PDFs"),
+            ("pdf_header_linea3", "", "Tercera línea del encabezado (dirección/teléfono)"),
+            ("pdf_footer", "Documento confidencial - Uso exclusivo del servicio de medicina laboral", "Pie de página de PDFs"),
+        ]
+        for clave, valor, descripcion in config_defaults:
+            existing = await get_by_clave(s, clave)
+            if not existing:
+                s.add(Configuracion(clave=clave, valor=valor, descripcion=descripcion))
+                print(f"  + config: {clave}")
+            else:
+                print(f"  (ya existe) config: {clave}")
 
         await s.commit()
         print("Seed OK")

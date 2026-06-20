@@ -52,7 +52,15 @@ async def list_(
     limit: int = 50,
     offset: int = 0,
 ) -> list[Licencia]:
-    stmt = select(Licencia).order_by(Licencia.fecha_desde.desc()).limit(limit).offset(offset)
+    from app.modules.empleados.models import Empleado
+
+    stmt = (
+        select(Licencia)
+        .join(Empleado, Empleado.id == Licencia.empleado_id)
+        .order_by(Licencia.fecha_desde.desc(), Empleado.apellido, Empleado.nombre)
+        .limit(limit)
+        .offset(offset)
+    )
     conds = []
     if vigente:
         hoy = date.today()
@@ -70,8 +78,7 @@ async def list_(
     if conds:
         stmt = stmt.where(and_(*conds))
     if area_id:
-        from app.modules.empleados.models import Empleado
-        stmt = stmt.join(Empleado, Empleado.id == Licencia.empleado_id).where(Empleado.area_id == area_id)
+        stmt = stmt.where(Empleado.area_id == area_id)
     rows = list((await s.execute(stmt)).scalars())
     await _enrich(s, rows)
     return rows
@@ -129,6 +136,7 @@ async def _enrich(s: AsyncSession, rows: list[Licencia]) -> None:
         r.empleado_fecha_nacimiento = emp.fecha_nacimiento if emp else None  # type: ignore[attr-defined]
         r.empleado_fecha_ingreso = emp.fecha_ingreso if emp else None  # type: ignore[attr-defined]
         r.empleado_area_nombre = area_map.get(emp.area_id) if emp and emp.area_id else None  # type: ignore[attr-defined]
+        r.empleado_telefono = emp.telefono if emp else None  # type: ignore[attr-defined]
         r.tipo_licencia_nombre = tipo_map.get(r.tipo_licencia_id)  # type: ignore[attr-defined]
         r.creado_por_nombre = user_map.get(r.creado_por)  # type: ignore[attr-defined]
         r.validado_por_nombre = user_map.get(r.validado_por) if r.validado_por else None  # type: ignore[attr-defined]

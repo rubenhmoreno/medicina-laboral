@@ -22,7 +22,7 @@ _PAGE_W, _PAGE_H = A4
 _MARGIN = 1.5 * cm
 
 
-def generate_pdf(hc: HistoriaClinicaOut) -> bytes:
+def generate_pdf(hc: HistoriaClinicaOut, config: dict[str, str] | None = None) -> bytes:
     buf = io.BytesIO()
     doc = SimpleDocTemplate(
         buf,
@@ -60,11 +60,19 @@ def generate_pdf(hc: HistoriaClinicaOut) -> bytes:
     normal = styles["Normal"]
     small = ParagraphStyle("HCSmall", parent=normal, fontSize=8, textColor=colors.gray)
 
+    cfg = config or {}
+    header_l1 = cfg.get("pdf_header_linea1", "Municipalidad de Villa Allende")
+    header_l2 = cfg.get("pdf_header_linea2", "Servicio de Medicina Laboral")
+    header_l3 = cfg.get("pdf_header_linea3", "")
+    footer_text = cfg.get("pdf_footer", "Documento confidencial - Uso exclusivo del servicio de medicina laboral")
+
     elements: list = []
 
     # --- Header ---
     elements.append(Paragraph("Historia Clinica", title_style))
-    elements.append(Paragraph("Medicina Laboral - Villa Allende", normal))
+    elements.append(Paragraph(f"{header_l1} - {header_l2}", normal))
+    if header_l3:
+        elements.append(Paragraph(header_l3, small))
     elements.append(Spacer(1, 0.5 * cm))
 
     # --- Empleado ---
@@ -93,8 +101,9 @@ def generate_pdf(hc: HistoriaClinicaOut) -> bytes:
     # --- Licencias ---
     if hc.licencias:
         elements.append(Paragraph("Licencias", h2_style))
-        lic_header = ["Fecha desde", "Fecha hasta", "Tipo", "Diagnostico", "Dias", "Estado"]
+        lic_header = ["Fecha desde", "Fecha hasta", "Tipo", "Diagnostico", "Dias", "Estado", "Constatacion"]
         lic_rows = [lic_header]
+        _MODO_LABELS = {"presencial": "Presencial", "telefonica": "Telefonica", "no_necesaria": "No necesaria"}
         for lic in hc.licencias:
             lic_rows.append([
                 str(lic.fecha_desde),
@@ -103,8 +112,9 @@ def generate_pdf(hc: HistoriaClinicaOut) -> bytes:
                 lic.diagnostico or "—",
                 str(lic.dias_otorgados if lic.dias_otorgados is not None else lic.dias_solicitados),
                 lic.estado.value if hasattr(lic.estado, "value") else str(lic.estado),
+                _MODO_LABELS.get(lic.modo_constatacion or "", "—"),
             ])
-        col_w = [2.5 * cm, 2.5 * cm, 3.5 * cm, 4 * cm, 1.5 * cm, 2.5 * cm]
+        col_w = [2.2 * cm, 2.2 * cm, 3 * cm, 3.2 * cm, 1.3 * cm, 2 * cm, 2.6 * cm]
         t = Table(lic_rows, colWidths=col_w, repeatRows=1)
         t.setStyle(TableStyle([
             ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
@@ -199,6 +209,8 @@ def generate_pdf(hc: HistoriaClinicaOut) -> bytes:
 
     # --- Footer ---
     elements.append(Spacer(1, 1 * cm))
+    if footer_text:
+        elements.append(Paragraph(footer_text, small))
     elements.append(Paragraph(
         f"Documento generado por sistema — {datetime.now().strftime('%d/%m/%Y %H:%M')}",
         small,

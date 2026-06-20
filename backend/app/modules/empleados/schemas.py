@@ -17,6 +17,8 @@ class EmpleadoCreate(BaseModel):
     area_id: UUID | None = None
     categoria_id: UUID
     supervisor_id: UUID | None = None
+    obra_social: str | None = None
+    nro_carnet: str | None = None
     email: EmailStr | None = None
     telefono: str | None = None
 
@@ -32,6 +34,8 @@ class EmpleadoUpdate(BaseModel):
     area_id: UUID | None = None
     categoria_id: UUID | None = None
     supervisor_id: UUID | None = None
+    obra_social: str | None = None
+    nro_carnet: str | None = None
     email: EmailStr | None = None
     telefono: str | None = None
     activo: bool | None = None
@@ -49,6 +53,8 @@ class EmpleadoOut(BaseModel):
     area_id: UUID | None
     categoria_id: UUID
     supervisor_id: UUID | None
+    obra_social: str | None
+    nro_carnet: str | None
     email: str | None
     telefono: str | None
     activo: bool

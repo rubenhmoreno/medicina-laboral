@@ -17,6 +17,7 @@ export function LicenciaDetailPage() {
   const [modal, setModal] = useState<ModalType>(null);
   const [diasOtorgados, setDiasOtorgados] = useState("");
   const [motivo, setMotivo] = useState("");
+  const [modoConstatacion, setModoConstatacion] = useState("presencial");
   const [actionLoading, setActionLoading] = useState(false);
 
   async function reload() {
@@ -35,7 +36,7 @@ export function LicenciaDetailPage() {
       if (modal === "validar") {
         const d = parseInt(diasOtorgados, 10);
         if (Number.isFinite(d)) {
-          await licenciasApi.validar(lic!.id, d);
+          await licenciasApi.validar(lic!.id, d, modoConstatacion);
         }
       } else if (modal === "rechazar") {
         if (motivo) await licenciasApi.rechazar(lic!.id, motivo);
@@ -45,6 +46,7 @@ export function LicenciaDetailPage() {
       setModal(null);
       setMotivo("");
       setDiasOtorgados("");
+      setModoConstatacion("presencial");
       await reload();
     } finally {
       setActionLoading(false);
@@ -218,10 +220,18 @@ export function LicenciaDetailPage() {
                 <p className="mt-1 font-medium text-va-heading">{lic.validado_por_nombre ?? "—"}</p>
               </div>
               {lic.validado_en && (
-                <div className="col-span-2">
+                <div>
                   <p className="text-va-muted">Fecha de validacion</p>
                   <p className="mt-1 font-medium text-va-heading">
                     {new Date(lic.validado_en).toLocaleString("es-AR", { dateStyle: "medium", timeStyle: "short" })}
+                  </p>
+                </div>
+              )}
+              {lic.modo_constatacion && (
+                <div>
+                  <p className="text-va-muted">Modo de constatacion</p>
+                  <p className="mt-1 font-medium text-va-heading capitalize">
+                    {lic.modo_constatacion === "no_necesaria" ? "No necesaria" : lic.modo_constatacion === "telefonica" ? "Telefonica" : "Presencial"}
                   </p>
                 </div>
               )}
@@ -335,14 +345,46 @@ export function LicenciaDetailPage() {
           </>
         }
       >
-        <Input
-          label="Dias a otorgar"
-          type="number"
-          value={diasOtorgados}
-          onChange={(e) => setDiasOtorgados(e.target.value)}
-          min={1}
-          required
-        />
+        <div className="space-y-4">
+          {lic.empleado_telefono && (
+            <div className="rounded-lg bg-blue-50 border border-blue-200 p-3">
+              <p className="text-xs text-blue-600 font-medium uppercase tracking-wider">Telefono del paciente</p>
+              <p className="mt-1 text-base font-semibold text-blue-800 font-mono">{lic.empleado_telefono}</p>
+            </div>
+          )}
+
+          <Input
+            label="Dias a otorgar"
+            type="number"
+            value={diasOtorgados}
+            onChange={(e) => setDiasOtorgados(e.target.value)}
+            min={1}
+            required
+          />
+
+          <div>
+            <p className="mb-2 text-sm font-medium text-va-heading">Modo de constatacion</p>
+            <div className="space-y-2">
+              {[
+                { value: "presencial", label: "Presencial" },
+                { value: "telefonica", label: "Telefonica" },
+                { value: "no_necesaria", label: "No era necesario constatar" },
+              ].map((opt) => (
+                <label key={opt.value} className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="modo_constatacion"
+                    value={opt.value}
+                    checked={modoConstatacion === opt.value}
+                    onChange={(e) => setModoConstatacion(e.target.value)}
+                    className="h-4 w-4 text-accent-600 border-va-border focus:ring-accent-500"
+                  />
+                  <span className="text-sm text-va-body">{opt.label}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+        </div>
       </Modal>
 
       {/* Modal: Rechazar */}

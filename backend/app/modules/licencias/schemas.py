@@ -53,6 +53,7 @@ class LicenciaOut(BaseModel):
     creado_por: UUID
     validado_por: UUID | None
     validado_en: datetime | None
+    modo_constatacion: str | None = None
     # Enriched fields
     empleado_nombre: str | None = None
     empleado_legajo: str | None = None
@@ -60,6 +61,7 @@ class LicenciaOut(BaseModel):
     empleado_fecha_nacimiento: date | None = None
     empleado_fecha_ingreso: date | None = None
     empleado_area_nombre: str | None = None
+    empleado_telefono: str | None = None
     tipo_licencia_nombre: str | None = None
     creado_por_nombre: str | None = None
     validado_por_nombre: str | None = None
@@ -68,6 +70,7 @@ class LicenciaOut(BaseModel):
 class ValidarIn(BaseModel):
     dias_otorgados: int = Field(ge=0)
     observaciones: str | None = None
+    modo_constatacion: str = Field(pattern=r"^(telefonica|presencial|no_necesaria)$")
 
 
 class RechazarIn(BaseModel):

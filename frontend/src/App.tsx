@@ -20,6 +20,7 @@ import { AreasPage } from "./features/admin/AreasPage";
 import { CategoriasPage } from "./features/admin/CategoriasPage";
 import { TiposLicenciaPage } from "./features/admin/TiposLicenciaPage";
 import { EstudiosCatalogoPage } from "./features/admin/EstudiosCatalogoPage";
+import { ConfiguracionPage } from "./features/admin/ConfiguracionPage";
 import { HistoriaClinicaPage } from "./features/empleados/HistoriaClinicaPage";
 
 export default function App() {
@@ -49,6 +50,7 @@ export default function App() {
                 <Route path="/admin/categorias" element={<CategoriasPage />} />
                 <Route path="/admin/tipos-licencia" element={<TiposLicenciaPage />} />
                 <Route path="/admin/estudios-catalogo" element={<EstudiosCatalogoPage />} />
+                <Route path="/admin/configuracion" element={<ConfiguracionPage />} />
               </Route>
             </Route>
           </Route>

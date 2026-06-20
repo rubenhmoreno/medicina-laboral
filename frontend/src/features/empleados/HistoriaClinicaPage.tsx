@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, Link } from "react-router-dom";
 import { http } from "@/api/http";
 import { Badge, Button, Card, CardBody, PageHeader, Spinner } from "@/components/ui";
 
@@ -47,6 +47,7 @@ type Licencia = {
   estado: string; empleado_nombre: string | null;
   tipo_licencia_nombre: string | null; diagnostico: string | null;
   certificante: string | null; observaciones: string | null;
+  modo_constatacion: string | null;
 };
 
 type HistoriaClinica = {
@@ -162,7 +163,7 @@ export function HistoriaClinicaPage() {
             <div className="mt-4 space-y-2">
               {hc.licencias.length === 0 && <p className="text-sm text-va-muted">Sin licencias registradas</p>}
               {hc.licencias.map((lic) => (
-                <div key={lic.id} className="rounded-lg border border-va-border p-3 text-sm">
+                <Link key={lic.id} to={`/licencias/${lic.id}`} className="block rounded-lg border border-va-border p-3 text-sm hover:border-accent-400 hover:shadow-sm transition-all">
                   <div className="flex items-center justify-between">
                     <span className="font-medium text-va-heading">
                       {lic.fecha_desde} - {lic.fecha_hasta}
@@ -179,10 +180,13 @@ export function HistoriaClinicaPage() {
                   {lic.certificante && (
                     <p className="mt-1 text-va-muted">Certificante: {lic.certificante}</p>
                   )}
+                  {lic.modo_constatacion && (
+                    <p className="mt-1 text-va-muted">Constatacion: {lic.modo_constatacion === "no_necesaria" ? "No necesaria" : lic.modo_constatacion === "telefonica" ? "Telefonica" : "Presencial"}</p>
+                  )}
                   {lic.observaciones && (
                     <p className="mt-1 text-va-muted">Obs: {lic.observaciones}</p>
                   )}
-                </div>
+                </Link>
               ))}
             </div>
           )}
@@ -210,7 +214,9 @@ export function HistoriaClinicaPage() {
             <div className="mt-4 space-y-4">
               {hc.atenciones.length === 0 && <p className="text-sm text-va-muted">Sin atenciones registradas</p>}
               {hc.atenciones.map((ad) => (
-                <AtencionCard key={ad.atencion.id} data={ad} />
+                <Link key={ad.atencion.id} to={`/atenciones/${ad.atencion.id}`} className="block hover:shadow-sm transition-all">
+                  <AtencionCard data={ad} />
+                </Link>
               ))}
             </div>
           )}
@@ -225,7 +231,7 @@ function AtencionCard({ data }: { data: AtencionConDetalles }) {
   const fecha = new Date(a.fecha_turno).toLocaleString("es-AR", { dateStyle: "medium", timeStyle: "short" });
 
   return (
-    <div className="rounded-lg border border-va-border p-4 space-y-3">
+    <div className="rounded-lg border border-va-border p-4 space-y-3 hover:border-accent-400 transition-colors">
       <div className="flex items-center justify-between">
         <span className="text-sm font-medium text-va-heading">{fecha} — {a.motivo}</span>
         <Badge>{a.estado}</Badge>

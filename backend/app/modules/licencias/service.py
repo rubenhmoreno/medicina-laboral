@@ -80,6 +80,7 @@ async def validar(
     frm = lic.estado
     lic.estado = next_state(frm, "validar", actor.rol)
     lic.dias_otorgados = payload.dias_otorgados
+    lic.modo_constatacion = payload.modo_constatacion
     if payload.observaciones:
         lic.observaciones = (lic.observaciones or "") + f"\n[validación] {payload.observaciones}"
     lic.validado_por = actor.id

@@ -22,6 +22,8 @@ class Empleado(Base):
     area_id: Mapped[UUID | None] = mapped_column(PgUUID(as_uuid=True), ForeignKey("areas.id"), nullable=True)
     categoria_id: Mapped[UUID] = mapped_column(PgUUID(as_uuid=True), ForeignKey("categorias_laborales.id"))
     supervisor_id: Mapped[UUID | None] = mapped_column(PgUUID(as_uuid=True), ForeignKey("empleados.id"), nullable=True)
+    obra_social: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    nro_carnet: Mapped[str | None] = mapped_column(String(40), nullable=True)
     email: Mapped[str | None] = mapped_column(String(255), nullable=True)
     telefono: Mapped[str | None] = mapped_column(String(40), nullable=True)
     activo: Mapped[bool] = mapped_column(Boolean, default=True)

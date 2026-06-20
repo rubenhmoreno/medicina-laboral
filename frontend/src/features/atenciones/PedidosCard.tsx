@@ -20,7 +20,15 @@ const TIPO_COLORS: Record<string, "blue" | "green" | "amber" | "gray"> = {
   otro: "gray",
 };
 
-export function PedidosCard({ atencionId }: { atencionId: string }) {
+type PedidosCardProps = {
+  atencionId: string;
+  empleadoNombre?: string | null;
+  empleadoFechaNacimiento?: string | null;
+  empleadoObraSocial?: string | null;
+  empleadoNroCarnet?: string | null;
+};
+
+export function PedidosCard({ atencionId, empleadoNombre, empleadoFechaNacimiento, empleadoObraSocial, empleadoNroCarnet }: PedidosCardProps) {
   const { user } = useAuth();
   const canEdit = user && (user.rol === "admin" || user.rol === "medico");
   const [rows, setRows] = useState<Pedido[]>([]);
@@ -163,6 +171,113 @@ export function PedidosCard({ atencionId }: { atencionId: string }) {
     }
   }
 
+  async function handlePrint(ped: Pedido) {
+    // Fetch config + signos vitales in parallel
+    let config: Record<string, string> = {};
+    let pesoKg: number | null = null;
+    let alturaCm: number | null = null;
+    try {
+      const [cfgRes, svRes] = await Promise.all([
+        http.get<{ clave: string; valor: string }[]>("/api/configuracion").catch(() => ({ data: [] as { clave: string; valor: string }[] })),
+        http.get<{ peso_kg: number | null; altura_cm: number | null }>(`/api/signos-vitales/by-atencion/${atencionId}`).catch(() => ({ data: null })),
+      ]);
+      for (const c of cfgRes.data) config[c.clave] = c.valor;
+      if (svRes.data) {
+        pesoKg = svRes.data.peso_kg;
+        alturaCm = svRes.data.altura_cm;
+      }
+    } catch { /* use defaults */ }
+
+    const headerL1 = config.pdf_header_linea1 || "Municipalidad de Villa Allende";
+    const headerL2 = config.pdf_header_linea2 || "Servicio de Medicina Laboral";
+    const headerL3 = config.pdf_header_linea3 || "";
+    const footer = config.pdf_footer || "";
+
+    // Compute age
+    let edad = "";
+    if (empleadoFechaNacimiento) {
+      const birth = new Date(empleadoFechaNacimiento);
+      const today = new Date();
+      let years = today.getFullYear() - birth.getFullYear();
+      const m = today.getMonth() - birth.getMonth();
+      if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) years--;
+      edad = `${years} años`;
+    }
+
+    const fecha = new Date(ped.created_at).toLocaleDateString("es-AR", { day: "2-digit", month: "2-digit", year: "numeric" });
+    const tipoLabel = ped.tipo.charAt(0).toUpperCase() + ped.tipo.slice(1);
+
+    // Build patient info parts
+    const patientParts: string[] = [];
+    if (empleadoNombre) patientParts.push(`<strong>Paciente:</strong> ${empleadoNombre}`);
+    if (edad) patientParts.push(`<strong>Edad:</strong> ${edad}`);
+    if (empleadoObraSocial) patientParts.push(`<strong>Obra social:</strong> ${empleadoObraSocial}`);
+    if (empleadoNroCarnet) patientParts.push(`<strong>Nro. carnet:</strong> ${empleadoNroCarnet}`);
+    if (pesoKg != null) patientParts.push(`<strong>Peso:</strong> ${pesoKg} kg`);
+    if (alturaCm != null) patientParts.push(`<strong>Estatura:</strong> ${alturaCm} cm`);
+
+    const win = window.open("", "_blank", "width=800,height=600");
+    if (!win) return;
+
+    // Build compact items list (two columns if many items)
+    const itemsHtml = ped.items.map((it, i) =>
+      `<tr><td style="width:20px;text-align:center;color:#718096;">${i + 1}</td><td>${it.descripcion}</td></tr>`
+    ).join("");
+
+    const html = `<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Pedido Medico - ${tipoLabel}</title>
+<style>
+  @page { size: A4; margin: 1.2cm 1.5cm; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: Arial, 'Segoe UI', sans-serif; font-size: 11px; color: #1a202c; }
+  .header { text-align: center; border-bottom: 1.5px solid #2c5282; padding-bottom: 6px; margin-bottom: 8px; }
+  .header h1 { font-size: 13px; color: #2c5282; margin: 0; line-height: 1.3; }
+  .header h2 { font-size: 11px; color: #4a5568; font-weight: normal; margin: 0; line-height: 1.3; }
+  .header p { font-size: 9px; color: #718096; margin: 0; }
+  .title-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+  .title-row h3 { font-size: 12px; font-weight: bold; color: #2d3748; }
+  .badge { display: inline-block; padding: 1px 8px; border-radius: 3px; font-size: 9px; font-weight: 600; color: white; background: ${ped.tipo === "laboratorio" ? "#3182ce" : ped.tipo === "imagen" ? "#38a169" : ped.tipo === "interconsulta" ? "#d69e2e" : "#718096"}; }
+  .patient { margin-bottom: 6px; padding: 4px 8px; background: #f7fafc; border: 1px solid #e2e8f0; border-radius: 4px; font-size: 10px; line-height: 1.6; }
+  .patient strong { color: #2d3748; }
+  .meta { font-size: 10px; color: #4a5568; margin-bottom: 6px; }
+  .meta strong { color: #2d3748; }
+  table { width: 100%; border-collapse: collapse; margin-bottom: 8px; }
+  th { text-align: left; padding: 3px 6px; background: #edf2f7; border: 1px solid #e2e8f0; font-size: 10px; color: #4a5568; }
+  td { padding: 3px 6px; border: 1px solid #e2e8f0; font-size: 10px; }
+  .firma-row { margin-top: 30px; display: flex; justify-content: flex-end; }
+  .firma { text-align: center; border-top: 1px solid #1a202c; padding-top: 3px; min-width: 180px; font-size: 9px; color: #4a5568; }
+  .page-footer { position: fixed; bottom: 0; left: 0; right: 0; text-align: center; font-size: 8px; color: #a0aec0; border-top: 1px solid #e2e8f0; padding: 4px 0; }
+  @media print { body { padding: 0; } }
+</style>
+</head>
+<body>
+  <div class="header">
+    <h1>${headerL1}</h1>
+    <h2>${headerL2}</h2>
+    ${headerL3 ? `<p>${headerL3}</p>` : ""}
+  </div>
+  <div class="title-row">
+    <h3>Pedido Medico — <span class="badge">${tipoLabel}</span></h3>
+    <span style="font-size:10px;color:#4a5568;">Fecha: ${fecha}</span>
+  </div>
+  <div class="patient">${patientParts.join(" &nbsp;|&nbsp; ")}</div>
+  ${ped.diagnostico || ped.indicaciones ? `<div class="meta">${ped.diagnostico ? `<strong>Dx:</strong> ${ped.diagnostico}` : ""}${ped.diagnostico && ped.indicaciones ? " &nbsp;&mdash;&nbsp; " : ""}${ped.indicaciones ? `<strong>Indicaciones:</strong> ${ped.indicaciones}` : ""}</div>` : ""}
+  <table>
+    <thead><tr><th style="width:20px">#</th><th>Estudio / Practica</th></tr></thead>
+    <tbody>${itemsHtml}</tbody>
+  </table>
+  <div class="firma-row"><div class="firma">Firma y sello del medico</div></div>
+  ${footer ? `<div class="page-footer">${footer}</div>` : ""}
+  <script>window.onload = function() { window.print(); }<\/script>
+</body>
+</html>`;
+    win.document.write(html);
+    win.document.close();
+  }
+
   if (loading) return <div className="text-sm text-va-muted py-4">Cargando pedidos...</div>;
 
   // Names of selected estudios for display
@@ -253,7 +368,19 @@ export function PedidosCard({ atencionId }: { atencionId: string }) {
                 <h4 className="text-sm font-semibold text-va-heading">Pedido</h4>
                 <Badge variant={TIPO_COLORS[ped.tipo] ?? "gray"}>{ped.tipo}</Badge>
               </div>
-              <span className="text-xs text-va-muted">{new Date(ped.created_at).toLocaleString("es-AR")}</span>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => handlePrint(ped)}
+                  className="inline-flex items-center gap-1.5 text-sm text-accent-600 hover:text-accent-700 hover:underline"
+                  title="Imprimir pedido"
+                >
+                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6.72 13.829c-.24.03-.48.062-.72.096m.72-.096a42.415 42.415 0 0110.56 0m-10.56 0L6.34 18m10.94-4.171c.24.03.48.062.72.096m-.72-.096L17.66 18m0 0l.229 2.523a1.125 1.125 0 01-1.12 1.227H7.231c-.662 0-1.18-.568-1.12-1.227L6.34 18m11.318 0h1.091A2.25 2.25 0 0021 15.75V9.456c0-1.081-.768-2.015-1.837-2.175a48.055 48.055 0 00-1.913-.247M6.34 18H5.25A2.25 2.25 0 013 15.75V9.456c0-1.081.768-2.015 1.837-2.175a48.041 48.041 0 011.913-.247m10.5 0a48.536 48.536 0 00-10.5 0m10.5 0V3.375c0-.621-.504-1.125-1.125-1.125h-8.25c-.621 0-1.125.504-1.125 1.125v3.659M18 10.5h.008v.008H18V10.5zm-3 0h.008v.008H15V10.5z" />
+                  </svg>
+                  Imprimir
+                </button>
+                <span className="text-xs text-va-muted">{new Date(ped.created_at).toLocaleString("es-AR")}</span>
+              </div>
             </div>
             {ped.diagnostico && (
               <p className="text-sm"><span className="font-medium text-va-heading">Diagnostico: </span><span className="text-va-body">{ped.diagnostico}</span></p>

@@ -13,6 +13,7 @@ export function EmpleadoCreateForm() {
     legajo: "", cuil: "", nombre: "", apellido: "",
     fecha_nacimiento: "", fecha_ingreso: "",
     area_id: "", categoria_id: "", supervisor_id: "",
+    obra_social: "", nro_carnet: "",
     email: "", telefono: "",
   });
   const [error, setError] = useState<string | null>(null);
@@ -35,6 +36,7 @@ export function EmpleadoCreateForm() {
         area_id: form.area_id || null,
         categoria_id: form.categoria_id,
         supervisor_id: form.supervisor_id || null,
+        obra_social: form.obra_social || null, nro_carnet: form.nro_carnet || null,
         email: form.email || null, telefono: form.telefono || null,
       });
       nav("/empleados");
@@ -71,6 +73,8 @@ export function EmpleadoCreateForm() {
                 <Input label="Fecha de nacimiento" type="date" value={form.fecha_nacimiento} onChange={(e) => setF("fecha_nacimiento", e.target.value)} />
                 <Input label="Email" type="email" value={form.email} onChange={(e) => setF("email", e.target.value)} />
                 <Input label="Telefono" value={form.telefono} onChange={(e) => setF("telefono", e.target.value)} />
+                <Input label="Obra social" value={form.obra_social} onChange={(e) => setF("obra_social", e.target.value)} placeholder="Ej: OSDE, APROSS, Swiss Medical" />
+                <Input label="Nro. carnet obra social" value={form.nro_carnet} onChange={(e) => setF("nro_carnet", e.target.value)} placeholder="Numero de carnet" />
               </div>
             </div>
 

@@ -25,6 +25,7 @@ from app.modules.evoluciones import models as _evol_models  # noqa: F401
 from app.modules.recetas import models as _recetas_models  # noqa: F401
 from app.modules.pedidos import models as _pedidos_models  # noqa: F401
 from app.modules.estudios_catalogo import models as _estudios_models  # noqa: F401
+from app.modules.configuracion import models as _config_models  # noqa: F401
 
 config = context.config
 if config.config_file_name:

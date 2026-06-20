@@ -37,4 +37,7 @@ class AtencionOut(BaseModel):
     empleado_nombre: str | None = None
     empleado_legajo: str | None = None
     empleado_cuil: str | None = None
+    empleado_obra_social: str | None = None
+    empleado_nro_carnet: str | None = None
+    empleado_fecha_nacimiento: str | None = None
     medico_nombre: str | None = None

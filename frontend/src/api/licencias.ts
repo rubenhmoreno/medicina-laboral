@@ -12,12 +12,14 @@ export type Licencia = {
   observaciones: string | null; motivo_rechazo: string | null; motivo_anulacion: string | null;
   certificante: string | null; matricula_certificante: string | null;
   creado_por: string; validado_por: string | null; validado_en: string | null;
+  modo_constatacion: string | null;
   empleado_nombre?: string | null;
   empleado_legajo?: string | null;
   empleado_cuil?: string | null;
   empleado_fecha_nacimiento?: string | null;
   empleado_fecha_ingreso?: string | null;
   empleado_area_nombre?: string | null;
+  empleado_telefono?: string | null;
   tipo_licencia_nombre?: string | null;
   creado_por_nombre?: string | null;
   validado_por_nombre?: string | null;
@@ -37,8 +39,8 @@ export const licenciasApi = {
   get: (id: string) => http.get<Licencia>(`/api/licencias/${id}`).then((r) => r.data),
   create: (p: LicenciaCreate) => http.post<Licencia>("/api/licencias", p).then((r) => r.data),
   enviar: (id: string) => http.post<Licencia>(`/api/licencias/${id}/enviar`).then((r) => r.data),
-  validar: (id: string, dias_otorgados: number, observaciones?: string) =>
-    http.post<Licencia>(`/api/licencias/${id}/validar`, { dias_otorgados, observaciones }).then((r) => r.data),
+  validar: (id: string, dias_otorgados: number, modo_constatacion: string, observaciones?: string) =>
+    http.post<Licencia>(`/api/licencias/${id}/validar`, { dias_otorgados, modo_constatacion, observaciones }).then((r) => r.data),
   rechazar: (id: string, motivo_rechazo: string) =>
     http.post<Licencia>(`/api/licencias/${id}/rechazar`, { motivo_rechazo }).then((r) => r.data),
   anular: (id: string, motivo_anulacion: string) =>

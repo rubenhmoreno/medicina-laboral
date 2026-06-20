@@ -144,6 +144,43 @@ def main():
         {"nombre": "VDRL", "codigo": "LAB-060", "tipo": "laboratorio", "categoria": "Serología"},
         {"nombre": "HIV (ELISA)", "codigo": "LAB-061", "tipo": "laboratorio", "categoria": "Serología"},
         {"nombre": "Hepatitis B (HBsAg)", "codigo": "LAB-062", "tipo": "laboratorio", "categoria": "Serología"},
+        # Laboratorio - Endocrinología
+        {"nombre": "T3 total", "codigo": "LAB-070", "tipo": "laboratorio", "categoria": "Endocrinología"},
+        {"nombre": "T3 libre", "codigo": "LAB-071", "tipo": "laboratorio", "categoria": "Endocrinología"},
+        {"nombre": "Tiroglobulina", "codigo": "LAB-072", "tipo": "laboratorio", "categoria": "Endocrinología"},
+        {"nombre": "Anti-TPO (anticuerpos antiperoxidasa)", "codigo": "LAB-073", "tipo": "laboratorio", "categoria": "Endocrinología"},
+        {"nombre": "Cortisol matinal", "codigo": "LAB-074", "tipo": "laboratorio", "categoria": "Endocrinología"},
+        {"nombre": "Insulina basal", "codigo": "LAB-075", "tipo": "laboratorio", "categoria": "Endocrinología"},
+        {"nombre": "PTH (paratohormona)", "codigo": "LAB-076", "tipo": "laboratorio", "categoria": "Endocrinología"},
+        {"nombre": "Estradiol", "codigo": "LAB-077", "tipo": "laboratorio", "categoria": "Endocrinología"},
+        {"nombre": "Testosterona total", "codigo": "LAB-078", "tipo": "laboratorio", "categoria": "Endocrinología"},
+        {"nombre": "Prolactina", "codigo": "LAB-079", "tipo": "laboratorio", "categoria": "Endocrinología"},
+        # Laboratorio - Hepáticos
+        {"nombre": "Hepatograma completo", "codigo": "LAB-080", "tipo": "laboratorio", "categoria": "Hepáticos"},
+        {"nombre": "GGT (gamma glutamil transferasa)", "codigo": "LAB-081", "tipo": "laboratorio", "categoria": "Hepáticos"},
+        {"nombre": "LDH (lactato deshidrogenasa)", "codigo": "LAB-082", "tipo": "laboratorio", "categoria": "Hepáticos"},
+        {"nombre": "Proteínas totales y albúmina", "codigo": "LAB-083", "tipo": "laboratorio", "categoria": "Hepáticos"},
+        {"nombre": "Bilirrubina fraccionada", "codigo": "LAB-084", "tipo": "laboratorio", "categoria": "Hepáticos"},
+        {"nombre": "Hepatitis A (IgM anti-HAV)", "codigo": "LAB-085", "tipo": "laboratorio", "categoria": "Hepáticos"},
+        {"nombre": "Hepatitis C (anti-HCV)", "codigo": "LAB-086", "tipo": "laboratorio", "categoria": "Hepáticos"},
+        # Laboratorio - Coagulación
+        {"nombre": "Coagulograma completo", "codigo": "LAB-090", "tipo": "laboratorio", "categoria": "Coagulación"},
+        {"nombre": "KPTT (tiempo tromboplastina parcial)", "codigo": "LAB-091", "tipo": "laboratorio", "categoria": "Coagulación"},
+        {"nombre": "Tiempo de protrombina (Quick)", "codigo": "LAB-092", "tipo": "laboratorio", "categoria": "Coagulación"},
+        {"nombre": "INR", "codigo": "LAB-093", "tipo": "laboratorio", "categoria": "Coagulación"},
+        {"nombre": "Fibrinógeno", "codigo": "LAB-094", "tipo": "laboratorio", "categoria": "Coagulación"},
+        {"nombre": "Dímero D", "codigo": "LAB-095", "tipo": "laboratorio", "categoria": "Coagulación"},
+        {"nombre": "Tiempo de sangría", "codigo": "LAB-096", "tipo": "laboratorio", "categoria": "Coagulación"},
+        # Laboratorio - Alergias / Inmunología
+        {"nombre": "IgE total", "codigo": "LAB-100", "tipo": "laboratorio", "categoria": "Alergias / Inmunología"},
+        {"nombre": "Panel alérgenos inhalatorios", "codigo": "LAB-101", "tipo": "laboratorio", "categoria": "Alergias / Inmunología"},
+        {"nombre": "Panel alérgenos alimentarios", "codigo": "LAB-102", "tipo": "laboratorio", "categoria": "Alergias / Inmunología"},
+        {"nombre": "RAST (IgE específica)", "codigo": "LAB-103", "tipo": "laboratorio", "categoria": "Alergias / Inmunología"},
+        {"nombre": "Complemento C3", "codigo": "LAB-104", "tipo": "laboratorio", "categoria": "Alergias / Inmunología"},
+        {"nombre": "Complemento C4", "codigo": "LAB-105", "tipo": "laboratorio", "categoria": "Alergias / Inmunología"},
+        {"nombre": "Factor reumatoideo", "codigo": "LAB-106", "tipo": "laboratorio", "categoria": "Alergias / Inmunología"},
+        {"nombre": "Anticuerpos antinucleares (ANA)", "codigo": "LAB-107", "tipo": "laboratorio", "categoria": "Alergias / Inmunología"},
+        {"nombre": "Proteína C reactiva cuantitativa", "codigo": "LAB-108", "tipo": "laboratorio", "categoria": "Alergias / Inmunología"},
         # Imagen - Radiología
         {"nombre": "Radiografía de tórax frente", "codigo": "IMG-001", "tipo": "imagen", "categoria": "Radiología"},
         {"nombre": "Radiografía de tórax frente y perfil", "codigo": "IMG-002", "tipo": "imagen", "categoria": "Radiología"},
@@ -390,7 +427,7 @@ def main():
     print("  Áreas:                2")
     print("  Diagnósticos CIE-10:  10")
     print("  Empleados:            3")
-    print(f"  Estudios catálogo:    {len(estudios)}")
+    print(f"  Estudios catálogo:    {len(estudios)} ({len([e for e in estudios if e['tipo']=='laboratorio'])} lab + {len([e for e in estudios if e['tipo']=='imagen'])} img)")
     print("  Atenciones:           3")
     print("  Signos vitales:       3")
     print("  Evoluciones:          3")

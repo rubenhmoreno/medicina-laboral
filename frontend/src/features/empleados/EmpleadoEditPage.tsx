@@ -10,6 +10,7 @@ type Empleado = {
   fecha_nacimiento: string | null; fecha_ingreso: string;
   area_id: string | null; categoria_id: string;
   supervisor_id: string | null;
+  obra_social: string | null; nro_carnet: string | null;
   email: string | null; telefono: string | null; activo: boolean;
 };
 
@@ -22,6 +23,7 @@ export function EmpleadoEditPage() {
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({
     nombre: "", apellido: "", area_id: "", categoria_id: "",
+    obra_social: "", nro_carnet: "",
     email: "", telefono: "", activo: true,
   });
   const [empleado, setEmpleado] = useState<Empleado | null>(null);
@@ -39,6 +41,7 @@ export function EmpleadoEditPage() {
       setForm({
         nombre: emp.nombre, apellido: emp.apellido,
         area_id: emp.area_id || "", categoria_id: emp.categoria_id,
+        obra_social: emp.obra_social || "", nro_carnet: emp.nro_carnet || "",
         email: emp.email || "", telefono: emp.telefono || "",
         activo: emp.activo,
       });
@@ -54,6 +57,7 @@ export function EmpleadoEditPage() {
       await http.put(`/api/empleados/${id}`, {
         nombre: form.nombre, apellido: form.apellido,
         area_id: form.area_id || null, categoria_id: form.categoria_id,
+        obra_social: form.obra_social || null, nro_carnet: form.nro_carnet || null,
         email: form.email || null, telefono: form.telefono || null,
         activo: form.activo,
       });
@@ -94,6 +98,8 @@ export function EmpleadoEditPage() {
                 <Input label="Nombre" value={form.nombre} onChange={(e) => setF("nombre", e.target.value)} required />
                 <Input label="Email" type="email" value={form.email} onChange={(e) => setF("email", e.target.value)} />
                 <Input label="Telefono" value={form.telefono} onChange={(e) => setF("telefono", e.target.value)} />
+                <Input label="Obra social" value={form.obra_social} onChange={(e) => setF("obra_social", e.target.value)} placeholder="Ej: OSDE, APROSS, Swiss Medical" />
+                <Input label="Nro. carnet obra social" value={form.nro_carnet} onChange={(e) => setF("nro_carnet", e.target.value)} placeholder="Numero de carnet" />
               </div>
             </div>
 

@@ -17,6 +17,9 @@ type Atencion = {
   empleado_nombre?: string | null;
   empleado_legajo?: string | null;
   empleado_cuil?: string | null;
+  empleado_obra_social?: string | null;
+  empleado_nro_carnet?: string | null;
+  empleado_fecha_nacimiento?: string | null;
   medico_nombre?: string | null;
 };
 
@@ -216,11 +219,11 @@ export function AtencionDetailPage() {
         )}
 
         {activeTab === "recetas" && (
-          <RecetasCard atencionId={id!} />
+          <RecetasCard atencionId={id!} empleadoNombre={atencion.empleado_nombre} empleadoLegajo={atencion.empleado_legajo} />
         )}
 
         {activeTab === "pedidos" && (
-          <PedidosCard atencionId={id!} />
+          <PedidosCard atencionId={id!} empleadoNombre={atencion.empleado_nombre} empleadoFechaNacimiento={atencion.empleado_fecha_nacimiento} empleadoObraSocial={atencion.empleado_obra_social} empleadoNroCarnet={atencion.empleado_nro_carnet} />
         )}
 
         {activeTab === "adjuntos" && (

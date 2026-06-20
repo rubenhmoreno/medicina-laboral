@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { http } from "@/api/http";
 import { useAuth } from "@/auth/AuthContext";
 import { Button, Card, CardBody, Input } from "@/components/ui";
@@ -76,7 +76,13 @@ const MEDICAMENTOS_ESTANDAR = [
   "Pregabalina 150mg",
 ];
 
-export function RecetasCard({ atencionId }: { atencionId: string }) {
+type RecetasCardProps = {
+  atencionId: string;
+  empleadoNombre?: string | null;
+  empleadoLegajo?: string | null;
+};
+
+export function RecetasCard({ atencionId, empleadoNombre, empleadoLegajo }: RecetasCardProps) {
   const { user } = useAuth();
   const canEdit = user && (user.rol === "admin" || user.rol === "medico");
   const [rows, setRows] = useState<Receta[]>([]);
@@ -165,7 +171,18 @@ export function RecetasCard({ atencionId }: { atencionId: string }) {
     }
   }
 
-  function handlePrint(rec: Receta) {
+  async function handlePrint(rec: Receta) {
+    let config: Record<string, string> = {};
+    try {
+      const { data } = await http.get<{ clave: string; valor: string }[]>("/api/configuracion");
+      for (const c of data) config[c.clave] = c.valor;
+    } catch { /* use defaults */ }
+
+    const headerL1 = config.pdf_header_linea1 || "Municipalidad de Villa Allende";
+    const headerL2 = config.pdf_header_linea2 || "Servicio de Medicina Laboral";
+    const headerL3 = config.pdf_header_linea3 || "";
+    const footer = config.pdf_footer || "";
+
     const win = window.open("", "_blank", "width=800,height=600");
     if (!win) return;
     const fecha = new Date(rec.created_at).toLocaleDateString("es-AR", { day: "2-digit", month: "2-digit", year: "numeric" });
@@ -179,8 +196,12 @@ export function RecetasCard({ atencionId }: { atencionId: string }) {
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 12px; color: #1a202c; padding: 20px; }
   .header { text-align: center; border-bottom: 2px solid #2c5282; padding-bottom: 12px; margin-bottom: 16px; }
-  .header h1 { font-size: 18px; color: #2c5282; margin-bottom: 2px; }
+  .header h1 { font-size: 16px; color: #2c5282; margin-bottom: 2px; }
+  .header h2 { font-size: 13px; color: #4a5568; font-weight: normal; margin-bottom: 2px; }
   .header p { font-size: 10px; color: #718096; }
+  .subtitle { text-align: center; font-size: 14px; font-weight: bold; color: #2d3748; margin-bottom: 16px; }
+  .patient { margin-bottom: 12px; padding: 8px 12px; background: #f7fafc; border: 1px solid #e2e8f0; border-radius: 6px; font-size: 11px; }
+  .patient strong { color: #2d3748; }
   .info { display: flex; justify-content: space-between; margin-bottom: 16px; font-size: 11px; }
   .rx { font-size: 28px; color: #2c5282; font-weight: bold; margin-bottom: 12px; }
   table { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
@@ -189,15 +210,22 @@ export function RecetasCard({ atencionId }: { atencionId: string }) {
   .dx { margin-bottom: 12px; font-size: 11px; }
   .dx strong { color: #2d3748; }
   .obs { margin-top: 8px; font-style: italic; color: #718096; font-size: 10px; }
-  .footer { margin-top: 40px; display: flex; justify-content: space-between; align-items: flex-end; }
+  .footer-section { margin-top: 40px; display: flex; justify-content: space-between; align-items: flex-end; }
   .firma { text-align: center; border-top: 1px solid #1a202c; padding-top: 4px; min-width: 200px; font-size: 10px; }
+  .page-footer { margin-top: 20px; text-align: center; font-size: 9px; color: #a0aec0; border-top: 1px solid #e2e8f0; padding-top: 8px; }
   @media print { body { padding: 0; } }
 </style>
 </head>
 <body>
   <div class="header">
-    <h1>Medicina Laboral — Villa Allende</h1>
-    <p>Receta Medica</p>
+    <h1>${headerL1}</h1>
+    <h2>${headerL2}</h2>
+    ${headerL3 ? `<p>${headerL3}</p>` : ""}
+  </div>
+  <div class="subtitle">Receta Medica</div>
+  <div class="patient">
+    ${empleadoNombre ? `<strong>Paciente:</strong> ${empleadoNombre}` : ""}
+    ${empleadoLegajo ? ` &nbsp;|&nbsp; <strong>Legajo:</strong> ${empleadoLegajo}` : ""}
   </div>
   <div class="info">
     <span>Fecha: ${fecha}</span>
@@ -221,11 +249,12 @@ export function RecetasCard({ atencionId }: { atencionId: string }) {
     </tbody>
   </table>
   ${rec.observaciones ? `<div class="obs">Obs: ${rec.observaciones}</div>` : ""}
-  <div class="footer">
+  <div class="footer-section">
     <div></div>
     <div class="firma">Firma y sello del medico</div>
   </div>
-  <script>window.onload = function() { window.print(); }</script>
+  ${footer ? `<div class="page-footer">${footer}</div>` : ""}
+  <script>window.onload = function() { window.print(); }<\/script>
 </body>
 </html>`;
     win.document.write(html);

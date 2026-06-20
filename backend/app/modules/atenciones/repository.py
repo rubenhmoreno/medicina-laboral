@@ -5,6 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.atenciones.models import Atencion, EstadoAtencion
+from app.modules.empleados.models import Empleado
 
 
 async def insert(s: AsyncSession, a: Atencion) -> Atencion:
@@ -25,7 +26,13 @@ async def list_(
     limit: int = 50,
     offset: int = 0,
 ) -> list[Atencion]:
-    stmt = select(Atencion).order_by(Atencion.fecha_turno.desc()).limit(limit).offset(offset)
+    stmt = (
+        select(Atencion)
+        .join(Empleado, Empleado.id == Atencion.empleado_id)
+        .order_by(Atencion.fecha_turno.desc(), Empleado.apellido, Empleado.nombre)
+        .limit(limit)
+        .offset(offset)
+    )
     if empleado_id:
         stmt = stmt.where(Atencion.empleado_id == empleado_id)
     if medico_id:
@@ -86,4 +93,7 @@ async def _enrich(s: AsyncSession, rows: list[Atencion]) -> None:
         r.empleado_nombre = f"{emp.apellido}, {emp.nombre}" if emp else None  # type: ignore[attr-defined]
         r.empleado_legajo = emp.legajo if emp else None  # type: ignore[attr-defined]
         r.empleado_cuil = emp.cuil if emp else None  # type: ignore[attr-defined]
+        r.empleado_obra_social = emp.obra_social if emp else None  # type: ignore[attr-defined]
+        r.empleado_nro_carnet = emp.nro_carnet if emp else None  # type: ignore[attr-defined]
+        r.empleado_fecha_nacimiento = str(emp.fecha_nacimiento) if emp and emp.fecha_nacimiento else None  # type: ignore[attr-defined]
         r.medico_nombre = medico_map.get(r.medico_id) if r.medico_id else None  # type: ignore[attr-defined]

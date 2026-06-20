@@ -42,7 +42,7 @@ async def get_one(id_: UUID, s: AsyncSession = Depends(get_db)):
 
 @router.post(
     "", response_model=EmpleadoOut, status_code=201,
-    dependencies=[Depends(require_role(Rol.ADMIN, Rol.RRHH))],
+    dependencies=[Depends(require_role(Rol.ADMIN, Rol.RRHH, Rol.MEDICO))],
 )
 async def create(payload: EmpleadoCreate, s: AsyncSession = Depends(get_db)):
     return await create_empleado(s, payload)
@@ -50,7 +50,7 @@ async def create(payload: EmpleadoCreate, s: AsyncSession = Depends(get_db)):
 
 @router.put(
     "/{id_}", response_model=EmpleadoOut,
-    dependencies=[Depends(require_role(Rol.ADMIN, Rol.RRHH))],
+    dependencies=[Depends(require_role(Rol.ADMIN, Rol.RRHH, Rol.MEDICO))],
 )
 async def update(id_: UUID, payload: EmpleadoUpdate, s: AsyncSession = Depends(get_db)):
     return await update_empleado(s, id_, payload)
@@ -71,10 +71,12 @@ async def historia_clinica_pdf(
     s: AsyncSession = Depends(get_db),
     _user: Usuario = Depends(current_user),
 ):
+    from app.modules.configuracion.repository import get_dict as config_get_dict
     from app.modules.empleados.pdf_historia import generate_pdf
 
     hc = await build_historia_clinica(s, id_)
-    pdf_bytes = generate_pdf(hc)
+    config = await config_get_dict(s)
+    pdf_bytes = generate_pdf(hc, config=config)
     legajo = hc.empleado.legajo
     return StreamingResponse(
         iter([pdf_bytes]),

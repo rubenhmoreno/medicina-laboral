@@ -64,6 +64,7 @@ const adminLinks = [
   { to: "/admin/categorias", label: "Categorias" },
   { to: "/admin/tipos-licencia", label: "Tipos licencia" },
   { to: "/admin/estudios-catalogo", label: "Estudios catalogo" },
+  { to: "/admin/configuracion", label: "Configuracion" },
 ];
 
 export function AppLayout() {

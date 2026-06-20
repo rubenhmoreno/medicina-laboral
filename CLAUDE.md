@@ -42,9 +42,9 @@ medicia-laboral/
 │   │   │   ├── middleware.py   # Request ID middleware
 │   │   │   └── throttle.py    # Login brute-force throttle
 │   │   ├── main.py             # FastAPI app factory + router registration
-│   │   └── modules/            # 15 modulos de negocio (ver detalle abajo)
+│   │   └── modules/            # 16 modulos de negocio (ver detalle abajo)
 │   ├── alembic/
-│   │   └── versions/           # Migraciones (6 archivos)
+│   │   └── versions/           # Migraciones (9 archivos)
 │   ├── scripts/
 │   │   └── seed_dev.py         # Seed admin + catalogos base
 │   ├── tests/
@@ -55,7 +55,7 @@ medicia-laboral/
 │   │   ├── auth/               # AuthContext + ProtectedRoute
 │   │   ├── components/ui/      # Biblioteca UI reutilizable (12 componentes)
 │   │   ├── features/           # Paginas por dominio
-│   │   │   ├── admin/          # CRUD catalogos + usuarios + topes
+│   │   │   ├── admin/          # CRUD catalogos + usuarios + topes + configuracion
 │   │   │   ├── empleados/      # Lista, crear, editar, historia clinica
 │   │   │   ├── licencias/      # Lista, formulario, detalle con workflow
 │   │   │   ├── atenciones/     # Lista, crear, detalle con tabs clinicos
@@ -118,7 +118,7 @@ POSTGRES_HOST=localhost uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
 
 ## Base de Datos — Esquema Completo
 
-### Tablas (17 tablas)
+### Tablas (18 tablas)
 
 Todas usan UUID (uuid7) como PK y tienen `created_at`, `updated_at` con server defaults.
 
@@ -146,6 +146,8 @@ Todas usan UUID (uuid7) como PK y tienen `created_at`, `updated_at` con server d
 | area_id | UUID FK → areas nullable | |
 | categoria_id | UUID FK → categorias | |
 | supervisor_id | UUID FK → empleados nullable | Self-ref |
+| obra_social | String(120) nullable | Nombre de la obra social |
+| nro_carnet | String(40) nullable | Numero de carnet de la obra social |
 | email | String nullable | |
 | telefono | String nullable | |
 | activo | Boolean | Default true |
@@ -205,6 +207,7 @@ Todas usan UUID (uuid7) como PK y tienen `created_at`, `updated_at` con server d
 | motivo_anulacion | Text nullable | |
 | certificante | String nullable | Nombre del certificante |
 | matricula_certificante | String nullable | |
+| modo_constatacion | String nullable | presencial, telefonica, virtual |
 | creado_por | UUID FK → usuarios | |
 | validado_por | UUID FK → usuarios nullable | |
 | validado_en | DateTime nullable | |
@@ -312,6 +315,16 @@ Todas usan UUID (uuid7) como PK y tienen `created_at`, `updated_at` con server d
 | storage_key | String | Ruta en MinIO |
 | subido_por | UUID FK → usuarios | |
 
+#### configuracion
+| Columna | Tipo | Notas |
+|---------|------|-------|
+| id | UUID PK | |
+| clave | String(100) UNIQUE | Clave de configuracion |
+| valor | Text | Valor (default "") |
+| descripcion | Text nullable | Descripcion para la UI |
+
+Claves actuales: `pdf_header_linea1`, `pdf_header_linea2`, `pdf_header_linea3`, `pdf_footer`
+
 #### auditoria
 | Columna | Tipo | Notas |
 |---------|------|-------|
@@ -336,6 +349,9 @@ c616894c3934  empty initial
 cf57f12cf1af  auditoria table
 b5f2a7d9e1c3  clinical features (signos_vitales, evoluciones, recetas, items_receta, pedidos, items_pedido, estudios_catalogo)
 d8a1e3f5b2c4  diagnostico texto libre (elimina tabla diagnosticos, convierte FKs a texto)
+e614aa488ccc  add configuracion table
+8cee745dc897  add obra_social, nro_carnet to empleados
+958076442bc7  add modo_constatacion to licencias
 ```
 
 Para ejecutar: `POSTGRES_HOST=localhost uv run alembic upgrade head`
@@ -416,7 +432,7 @@ Para ejecutar: `POSTGRES_HOST=localhost uv run alembic upgrade head`
 
 **Filtros GET**: estado, empleado_id, area_id, desde, hasta, vigente (bool), limit, offset
 
-**Respuesta enriquecida**: incluye `empleado_nombre`, `tipo_licencia_nombre`, `diagnostico` (texto), `empleado_legajo`, `empleado_cuil`, `empleado_area`
+**Respuesta enriquecida**: incluye `empleado_nombre`, `tipo_licencia_nombre`, `diagnostico` (texto), `empleado_legajo`, `empleado_cuil`, `empleado_area`, `modo_constatacion`
 
 ### Atenciones (`/api/atenciones`)
 | Metodo | Ruta | Descripcion | Roles |
@@ -428,7 +444,7 @@ Para ejecutar: `POSTGRES_HOST=localhost uv run alembic upgrade head`
 | POST | `/api/atenciones/{id}/completar` | Completar (notas) | admin, medico |
 | POST | `/api/atenciones/{id}/cancelar` | Cancelar | admin, rrhh |
 
-**Respuesta enriquecida**: incluye `empleado_nombre`, `empleado_legajo`, `empleado_cuil`, `medico_nombre`
+**Respuesta enriquecida**: incluye `empleado_nombre`, `empleado_legajo`, `empleado_cuil`, `empleado_obra_social`, `empleado_nro_carnet`, `empleado_fecha_nacimiento`, `medico_nombre`
 
 ### Signos Vitales (`/api/signos-vitales`)
 | Metodo | Ruta | Descripcion | Roles |
@@ -465,6 +481,12 @@ Para ejecutar: `POSTGRES_HOST=localhost uv run alembic upgrade head`
 | GET | `/api/estudios-catalogo` | Listar (tipo, activo) | autenticado |
 | POST | `/api/estudios-catalogo` | Crear | admin |
 | PUT | `/api/estudios-catalogo/{id}` | Actualizar | admin |
+
+### Configuracion (`/api/configuracion`)
+| Metodo | Ruta | Descripcion | Roles |
+|--------|------|-------------|-------|
+| GET | `/api/configuracion` | Listar todas las claves | autenticado |
+| PUT | `/api/configuracion/{clave}` | Actualizar valor | admin |
 
 ### Adjuntos (`/api/adjuntos`)
 | Metodo | Ruta | Descripcion | Roles |
@@ -517,6 +539,7 @@ Todos aceptan `desde`, `hasta`, `format=csv` para exportar.
 | `/admin/categorias` | CategoriasPage | CRUD categorias |
 | `/admin/tipos-licencia` | TiposLicenciaPage | CRUD tipos licencia |
 | `/admin/estudios-catalogo` | EstudiosCatalogoPage | CRUD catalogo estudios |
+| `/admin/configuracion` | ConfiguracionPage | Header/footer PDF configurable |
 
 ---
 
@@ -585,7 +608,7 @@ Todos aceptan `desde`, `hasta`, `format=csv` para exportar.
 | Cancelar atenciones | si | no | si |
 | Registrar signos/evoluciones/recetas/pedidos | si | si | no |
 | Subir adjuntos en atenciones | si | si | no |
-| Admin (usuarios, catalogos, topes) | si | no | no |
+| Admin (usuarios, catalogos, topes, configuracion) | si | no | no |
 | Reportes | si | si | si |
 | Historia clinica + PDF | si | si | si |
 
@@ -697,7 +720,7 @@ cd backend && POSTGRES_HOST=localhost uv run alembic upgrade head
 cd backend && POSTGRES_HOST=localhost uv run alembic revision --autogenerate -m "descripcion"
 
 # Seed datos de prueba
-cd backend && POSTGRES_HOST=localhost uv run python scripts/seed_dev.py
+cd backend && POSTGRES_HOST=localhost uv run python -m scripts.seed_dev
 uv run python scripts/seed_clinical_data.py
 
 # Tests
@@ -741,3 +764,6 @@ docker compose -f docker-compose.prod.yml up -d --build
 8. **MinIO signed URLs** — archivos nunca se sirven directamente, siempre via URL temporal firmada
 9. **ReportLab para PDF** — generacion server-side de historia clinica
 10. **Tabs en atencion** — UI separada por dominio clinico (signos, evolucion, recetas, pedidos, adjuntos)
+11. **Configuracion key-value** — tabla `configuracion` con claves como `pdf_header_linea1`, permite al admin personalizar header/footer de PDFs e impresiones
+12. **Impresion HTML** — recetas y pedidos se imprimen via `window.open()` + HTML template + `window.print()`, con header/footer leidos de `/api/configuracion`
+13. **Datos del paciente en impresion** — pedidos muestran nombre, edad (calculada de fecha_nacimiento), obra social, nro carnet, peso y estatura (de signos vitales)

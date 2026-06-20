@@ -5,6 +5,7 @@ export type Empleado = {
   nombre: string; apellido: string;
   fecha_nacimiento: string | null; fecha_ingreso: string;
   area_id: string | null; categoria_id: string; supervisor_id: string | null;
+  obra_social: string | null; nro_carnet: string | null;
   email: string | null; telefono: string | null; activo: boolean;
 };
 
@@ -14,6 +15,7 @@ export type EmpleadoUpdate = {
   nombre?: string; apellido?: string;
   area_id?: string | null; categoria_id?: string;
   supervisor_id?: string | null;
+  obra_social?: string | null; nro_carnet?: string | null;
   email?: string | null; telefono?: string | null;
   activo?: boolean;
 };
