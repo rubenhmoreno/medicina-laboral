@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { http } from "@/api/http";
 import { useAuth } from "@/auth/AuthContext";
 import { empleadosApi, type Empleado } from "@/api/empleados";
+import { adjuntosApi, validateFiles } from "@/api/adjuntos";
 import { Button, Input, Select, Card, CardBody, CardFooter, PageHeader } from "@/components/ui";
 
 type Usuario = { id: string; email: string; nombre: string | null; rol: string };
@@ -17,7 +18,7 @@ export function AtencionCreatePage() {
   const [form, setForm] = useState({
     empleado_id: "", medico_id: "", fecha_turno: "", motivo: "",
   });
-  const [file, setFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -41,11 +42,10 @@ export function AtencionCreatePage() {
         motivo: form.motivo,
       });
 
-      if (file) {
-        const fd = new FormData();
-        fd.append("atencion_id", atencion.id);
-        fd.append("file", file);
-        await http.post("/api/adjuntos", fd, { headers: { "Content-Type": "multipart/form-data" } });
+      if (files.length) {
+        const sizeErr = validateFiles(files);
+        if (sizeErr) { setError(sizeErr); setLoading(false); return; }
+        await adjuntosApi.uploadMany(files, { atencion_id: atencion.id });
       }
 
       nav(`/atenciones/${atencion.id}`);
@@ -117,13 +117,17 @@ export function AtencionCreatePage() {
             </div>
 
             <div>
-              <label className="mb-1.5 block text-sm font-medium text-va-heading">Adjunto (opcional)</label>
+              <label className="mb-1.5 block text-sm font-medium text-va-heading">Adjuntos (opcional, max 5 MB c/u)</label>
               <input
                 type="file"
                 accept=".pdf,.png,.jpg,.jpeg,.webp"
-                onChange={(e) => setFile(e.target.files?.[0] || null)}
+                multiple
+                onChange={(e) => setFiles(e.target.files ? Array.from(e.target.files) : [])}
                 className="block w-full text-sm text-va-body file:mr-3 file:rounded-lg file:border-0 file:bg-accent-50 file:px-4 file:py-2 file:text-sm file:font-medium file:text-accent-700 hover:file:bg-accent-100"
               />
+              {files.length > 0 && (
+                <p className="mt-1 text-xs text-va-muted">{files.length} archivo(s) seleccionado(s)</p>
+              )}
             </div>
 
             {error && (

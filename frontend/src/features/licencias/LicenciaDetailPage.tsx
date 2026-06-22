@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { licenciasApi, type Licencia } from "@/api/licencias";
-import { adjuntosApi, type Adjunto } from "@/api/adjuntos";
+import { adjuntosApi, validateFiles, type Adjunto } from "@/api/adjuntos";
 import { http } from "@/api/http";
 import { useAuth } from "@/auth/AuthContext";
 import { Badge, Button, Card, CardBody, Modal, Input, PageHeader, Spinner } from "@/components/ui";
@@ -19,6 +19,8 @@ export function LicenciaDetailPage() {
   const [motivo, setMotivo] = useState("");
   const [modoConstatacion, setModoConstatacion] = useState("presencial");
   const [actionLoading, setActionLoading] = useState(false);
+  const [uploadFiles, setUploadFiles] = useState<File[]>([]);
+  const [uploading, setUploading] = useState(false);
 
   async function reload() {
     setLic(await licenciasApi.get(id));
@@ -50,6 +52,22 @@ export function LicenciaDetailPage() {
       await reload();
     } finally {
       setActionLoading(false);
+    }
+  }
+
+  async function handleUploadLic() {
+    if (!uploadFiles.length) return;
+    const sizeErr = validateFiles(uploadFiles);
+    if (sizeErr) { alert(sizeErr); return; }
+    setUploading(true);
+    try {
+      await adjuntosApi.uploadMany(uploadFiles, { licencia_id: id });
+      setUploadFiles([]);
+      await reload();
+    } catch (err: any) {
+      alert(err?.response?.data?.error?.message ?? "Error al subir archivo");
+    } finally {
+      setUploading(false);
     }
   }
 
@@ -274,32 +292,56 @@ export function LicenciaDetailPage() {
       </div>
 
       {/* Adjuntos */}
-      {adjuntos.length > 0 && (
-        <Card>
-          <CardBody className="space-y-4">
-            <div className="flex items-center gap-2">
-              <div className="h-1 w-4 rounded-full gradient-va-horizontal" />
-              <h3 className="text-sm font-semibold uppercase tracking-wider text-va-heading">Adjuntos</h3>
-            </div>
-            <div className="space-y-3">
-              {adjuntos.map((adj) => (
-                <div key={adj.id} className="flex items-center gap-4 rounded-lg border border-va-border p-3">
-                  {adj.mime_type.startsWith("image/") && (
-                    <AdjuntoThumbnail adjId={adj.id} alt={adj.nombre_original} />
-                  )}
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-va-heading truncate">{adj.nombre_original}</p>
-                    <p className="text-xs text-va-muted">{adj.mime_type} - {Math.round(adj.size_bytes / 1024)} KB</p>
-                  </div>
-                  <button onClick={() => handleDownload(adj.id)} className="shrink-0 text-sm text-accent-600 hover:underline">
-                    {adj.mime_type === "application/pdf" ? "Ver PDF" : "Descargar"}
-                  </button>
+      <Card>
+        <CardBody className="space-y-4">
+          <div className="flex items-center gap-2">
+            <div className="h-1 w-4 rounded-full gradient-va-horizontal" />
+            <h3 className="text-sm font-semibold uppercase tracking-wider text-va-heading">Adjuntos</h3>
+          </div>
+
+          {adjuntos.length === 0 && (
+            <p className="text-sm text-va-muted">Sin adjuntos</p>
+          )}
+
+          <div className="space-y-3">
+            {adjuntos.map((adj) => (
+              <div key={adj.id} className="flex items-center gap-4 rounded-lg border border-va-border p-3">
+                {adj.mime_type.startsWith("image/") && (
+                  <AdjuntoThumbnail adjId={adj.id} alt={adj.nombre_original} />
+                )}
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-va-heading truncate">{adj.nombre_original}</p>
+                  <p className="text-xs text-va-muted">{adj.mime_type} - {Math.round(adj.size_bytes / 1024)} KB</p>
                 </div>
-              ))}
+                <button onClick={() => handleDownload(adj.id)} className="shrink-0 text-sm text-accent-600 hover:underline">
+                  {adj.mime_type === "application/pdf" ? "Ver PDF" : "Descargar"}
+                </button>
+              </div>
+            ))}
+          </div>
+
+          {user && (user.rol === "admin" || user.rol === "rrhh" || user.rol === "medico") && (
+            <div className="border-t border-va-border pt-4">
+              <label className="mb-1.5 block text-sm font-medium text-va-heading">Subir archivos (max 5 MB c/u)</label>
+              <div className="flex gap-2">
+                <input
+                  type="file"
+                  accept=".pdf,.png,.jpg,.jpeg,.webp"
+                  multiple
+                  onChange={(e) => setUploadFiles(e.target.files ? Array.from(e.target.files) : [])}
+                  className="block flex-1 text-sm text-va-body file:mr-3 file:rounded-lg file:border-0 file:bg-accent-50 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-accent-700 hover:file:bg-accent-100"
+                />
+                <Button size="sm" onClick={handleUploadLic} disabled={!uploadFiles.length} loading={uploading}>
+                  Subir
+                </Button>
+              </div>
+              {uploadFiles.length > 0 && (
+                <p className="mt-1 text-xs text-va-muted">{uploadFiles.length} archivo(s) seleccionado(s)</p>
+              )}
             </div>
-          </CardBody>
-        </Card>
-      )}
+          )}
+        </CardBody>
+      </Card>
 
       {/* Actions */}
       <div className="flex flex-wrap gap-3">

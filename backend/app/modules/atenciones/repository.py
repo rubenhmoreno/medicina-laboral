@@ -9,7 +9,11 @@ from app.modules.empleados.models import Empleado
 
 
 async def insert(s: AsyncSession, a: Atencion) -> Atencion:
-    s.add(a); await s.flush(); return a
+    s.add(a)
+    await s.flush()
+    await s.refresh(a)
+    await _enrich(s, [a])
+    return a
 
 
 async def get(s: AsyncSession, id_: UUID) -> Atencion | None:
@@ -58,6 +62,8 @@ async def update(s: AsyncSession, a: Atencion, **kwargs: object) -> Atencion:
     for k, v in kwargs.items():
         setattr(a, k, v)
     await s.flush()
+    await s.refresh(a)
+    await _enrich(s, [a])
     return a
 
 

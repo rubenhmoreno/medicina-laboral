@@ -8,6 +8,7 @@ import { SignosVitalesCard } from "./SignosVitalesCard";
 import { EvolucionesCard } from "./EvolucionesCard";
 import { RecetasCard } from "./RecetasCard";
 import { PedidosCard } from "./PedidosCard";
+import { validateFiles } from "@/api/adjuntos";
 
 type Atencion = {
   id: string; empleado_id: string; asignado_por: string;
@@ -53,7 +54,7 @@ export function AtencionDetailPage() {
   const [completarOpen, setCompletarOpen] = useState(false);
   const [notas, setNotas] = useState("");
   const [saving, setSaving] = useState(false);
-  const [file, setFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
   const [uploading, setUploading] = useState(false);
   const [activeTab, setActiveTab] = useState("info");
 
@@ -99,14 +100,18 @@ export function AtencionDetailPage() {
   }
 
   async function handleUpload() {
-    if (!file) return;
+    if (!files.length) return;
+    const sizeErr = validateFiles(files);
+    if (sizeErr) { alert(sizeErr); return; }
     setUploading(true);
     try {
-      const fd = new FormData();
-      fd.append("atencion_id", id!);
-      fd.append("file", file);
-      await http.post("/api/adjuntos", fd, { headers: { "Content-Type": "multipart/form-data" } });
-      setFile(null);
+      for (const f of files) {
+        const fd = new FormData();
+        fd.append("atencion_id", id!);
+        fd.append("file", f);
+        await http.post("/api/adjuntos", fd, { headers: { "Content-Type": "multipart/form-data" } });
+      }
+      setFiles([]);
       await reload();
     } catch (err: any) {
       alert(err?.response?.data?.error?.message ?? "Error al subir archivo");
@@ -249,18 +254,22 @@ export function AtencionDetailPage() {
 
               {user && (user.rol === "admin" || user.rol === "medico") && (
                 <div className="border-t border-va-border pt-4">
-                  <label className="mb-1.5 block text-sm font-medium text-va-heading">Subir archivo</label>
+                  <label className="mb-1.5 block text-sm font-medium text-va-heading">Subir archivos (max 5 MB c/u)</label>
                   <div className="flex gap-2">
                     <input
                       type="file"
                       accept=".pdf,.png,.jpg,.jpeg,.webp"
-                      onChange={(e) => setFile(e.target.files?.[0] || null)}
+                      multiple
+                      onChange={(e) => setFiles(e.target.files ? Array.from(e.target.files) : [])}
                       className="block flex-1 text-sm text-va-body file:mr-3 file:rounded-lg file:border-0 file:bg-accent-50 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-accent-700 hover:file:bg-accent-100"
                     />
-                    <Button size="sm" onClick={handleUpload} disabled={!file} loading={uploading}>
+                    <Button size="sm" onClick={handleUpload} disabled={!files.length} loading={uploading}>
                       Subir
                     </Button>
                   </div>
+                  {files.length > 0 && (
+                    <p className="mt-1 text-xs text-va-muted">{files.length} archivo(s) seleccionado(s)</p>
+                  )}
                 </div>
               )}
             </CardBody>

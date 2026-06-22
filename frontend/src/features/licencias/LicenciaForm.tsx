@@ -3,14 +3,14 @@ import { useNavigate } from "react-router-dom";
 import { catalogosApi, type TipoLicencia } from "@/api/catalogos";
 import { empleadosApi, type Empleado } from "@/api/empleados";
 import { licenciasApi } from "@/api/licencias";
-import { adjuntosApi } from "@/api/adjuntos";
+import { adjuntosApi, validateFiles } from "@/api/adjuntos";
 import { Button, Input, Select, Card, CardBody, CardFooter, PageHeader } from "@/components/ui";
 
 export function LicenciaForm() {
   const nav = useNavigate();
   const [empleados, setEmpleados] = useState<Empleado[]>([]);
   const [tipos, setTipos] = useState<TipoLicencia[]>([]);
-  const [file, setFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [form, setForm] = useState({
@@ -37,7 +37,11 @@ export function LicenciaForm() {
         certificante: form.certificante || null,
         matricula_certificante: form.matricula_certificante || null,
       });
-      if (file) await adjuntosApi.upload(file, { licencia_id: lic.id });
+      if (files.length) {
+        const sizeErr = validateFiles(files);
+        if (sizeErr) { setError(sizeErr); setLoading(false); return; }
+        await adjuntosApi.uploadMany(files, { licencia_id: lic.id });
+      }
       nav(`/licencias/${lic.id}`);
     } catch (err: any) {
       setError(err?.response?.data?.error?.message ?? "Error al crear licencia");
@@ -132,13 +136,17 @@ export function LicenciaForm() {
                   />
                 </div>
                 <div className="space-y-1.5">
-                  <label className="block text-sm font-medium text-va-heading">Adjunto (PDF/imagen)</label>
+                  <label className="block text-sm font-medium text-va-heading">Adjuntos (PDF/imagen, max 5 MB c/u)</label>
                   <input
                     type="file"
                     accept="application/pdf,image/*"
-                    onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+                    multiple
+                    onChange={(e) => setFiles(e.target.files ? Array.from(e.target.files) : [])}
                     className="block w-full text-sm text-va-body file:mr-4 file:rounded-lg file:border-0 file:bg-primary-50 file:px-4 file:py-2 file:text-sm file:font-medium file:text-primary-700 hover:file:bg-primary-100"
                   />
+                  {files.length > 0 && (
+                    <p className="text-xs text-va-muted">{files.length} archivo(s) seleccionado(s)</p>
+                  )}
                 </div>
               </div>
             </div>

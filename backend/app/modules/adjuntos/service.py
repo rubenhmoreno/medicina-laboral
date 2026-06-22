@@ -10,7 +10,7 @@ from app.modules.adjuntos.models import Adjunto
 from app.shared.exceptions import NotFoundError, ValidationError
 
 _ALLOWED_MIME = {"application/pdf", "image/png", "image/jpeg", "image/webp"}
-_MAX_SIZE_BYTES = 10 * 1024 * 1024  # 10 MB
+_MAX_SIZE_BYTES = 5 * 1024 * 1024  # 5 MB
 
 
 async def upload_adjunto(
