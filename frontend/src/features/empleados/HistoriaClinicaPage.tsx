@@ -181,7 +181,7 @@ export function HistoriaClinicaPage() {
                     <p className="mt-1 text-va-muted">Certificante: {lic.certificante}</p>
                   )}
                   {lic.modo_constatacion && (
-                    <p className="mt-1 text-va-muted">Constatacion: {lic.modo_constatacion === "no_necesaria" ? "No necesaria" : lic.modo_constatacion === "telefonica" ? "Telefonica" : "Presencial"}</p>
+                    <p className="mt-1 text-va-muted">Constatacion: {lic.modo_constatacion === "no_necesaria" ? "No necesario verificar" : lic.modo_constatacion === "telefonica" ? "Telefonica" : lic.modo_constatacion === "domicilio" ? "Domicilio" : lic.modo_constatacion === "consultorio" ? "Consultorio" : lic.modo_constatacion}</p>
                   )}
                   {lic.observaciones && (
                     <p className="mt-1 text-va-muted">Obs: {lic.observaciones}</p>

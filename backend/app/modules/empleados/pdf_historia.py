@@ -103,7 +103,7 @@ def generate_pdf(hc: HistoriaClinicaOut, config: dict[str, str] | None = None) -
         elements.append(Paragraph("Licencias", h2_style))
         lic_header = ["Fecha desde", "Fecha hasta", "Tipo", "Diagnostico", "Dias", "Estado", "Constatacion"]
         lic_rows = [lic_header]
-        _MODO_LABELS = {"presencial": "Presencial", "telefonica": "Telefonica", "no_necesaria": "No necesaria"}
+        _MODO_LABELS = {"telefonica": "Telefonica", "domicilio": "Domicilio", "consultorio": "Consultorio", "no_necesaria": "No necesario verificar"}
         for lic in hc.licencias:
             lic_rows.append([
                 str(lic.fecha_desde),

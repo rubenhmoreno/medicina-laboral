@@ -70,7 +70,7 @@ class LicenciaOut(BaseModel):
 class ValidarIn(BaseModel):
     dias_otorgados: int = Field(ge=0)
     observaciones: str | None = None
-    modo_constatacion: str = Field(pattern=r"^(telefonica|presencial|no_necesaria)$")
+    modo_constatacion: str = Field(pattern=r"^(telefonica|domicilio|consultorio|no_necesaria)$")
 
 
 class RechazarIn(BaseModel):

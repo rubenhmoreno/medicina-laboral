@@ -17,7 +17,7 @@ export function LicenciaDetailPage() {
   const [modal, setModal] = useState<ModalType>(null);
   const [diasOtorgados, setDiasOtorgados] = useState("");
   const [motivo, setMotivo] = useState("");
-  const [modoConstatacion, setModoConstatacion] = useState("presencial");
+  const [modoConstatacion, setModoConstatacion] = useState("telefonica");
   const [actionLoading, setActionLoading] = useState(false);
   const [uploadFiles, setUploadFiles] = useState<File[]>([]);
   const [uploading, setUploading] = useState(false);
@@ -48,7 +48,7 @@ export function LicenciaDetailPage() {
       setModal(null);
       setMotivo("");
       setDiasOtorgados("");
-      setModoConstatacion("presencial");
+      setModoConstatacion("telefonica");
       await reload();
     } finally {
       setActionLoading(false);
@@ -249,7 +249,7 @@ export function LicenciaDetailPage() {
                 <div>
                   <p className="text-va-muted">Modo de constatacion</p>
                   <p className="mt-1 font-medium text-va-heading capitalize">
-                    {lic.modo_constatacion === "no_necesaria" ? "No necesaria" : lic.modo_constatacion === "telefonica" ? "Telefonica" : "Presencial"}
+                    {lic.modo_constatacion === "no_necesaria" ? "No necesario verificar" : lic.modo_constatacion === "telefonica" ? "Telefonica" : lic.modo_constatacion === "domicilio" ? "Domicilio" : lic.modo_constatacion === "consultorio" ? "Consultorio" : lic.modo_constatacion}
                   </p>
                 </div>
               )}
@@ -408,9 +408,10 @@ export function LicenciaDetailPage() {
             <p className="mb-2 text-sm font-medium text-va-heading">Modo de constatacion</p>
             <div className="space-y-2">
               {[
-                { value: "presencial", label: "Presencial" },
                 { value: "telefonica", label: "Telefonica" },
-                { value: "no_necesaria", label: "No era necesario constatar" },
+                { value: "domicilio", label: "Domicilio" },
+                { value: "consultorio", label: "Consultorio" },
+                { value: "no_necesaria", label: "No era necesario verificar" },
               ].map((opt) => (
                 <label key={opt.value} className="flex items-center gap-2 cursor-pointer">
                   <input
